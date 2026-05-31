@@ -4,20 +4,6 @@ Go reference implementation of **excsv-cli** — a command-line tool and library
 
 Supports **plain** (`.excsv`, `.ecsv`) and **row ZIP** (`.excsv.zip`, `.ecsv.zip`) storage forms. Pack format (`.excsv.pack.zip`) is not implemented yet.
 
-## Specification
-
-Normative behaviour comes from the upstream spec and plan:
-
-| Document | Link |
-| --- | --- |
-| ExCSV specification (LLM reference) | [README-LLM.md](https://github.com/boligolov/excsv/blob/master/README-LLM.md) |
-| Implementation plan | [plan/README.md](https://github.com/boligolov/excsv/blob/master/plan/README.md) |
-| Feature catalog | [plan/01-features.md](https://github.com/boligolov/excsv/blob/master/plan/01-features.md) |
-| Test fixtures spec | [plan/02-fixtures.md](https://github.com/boligolov/excsv/blob/master/plan/02-fixtures.md) |
-| Fixture manifest | [fixtures/fixtures.yaml](https://github.com/boligolov/excsv/blob/master/fixtures/fixtures.yaml) |
-
-Local snapshots and refresh notes: [`docs/sources_and_specifications.md`](docs/sources_and_specifications.md). Implementation details: [`docs/implementation.md`](docs/implementation.md).
-
 ## Requirements
 
 - Go 1.22+
@@ -28,6 +14,37 @@ Local snapshots and refresh notes: [`docs/sources_and_specifications.md`](docs/s
 ```powershell
 go build -o excsv.exe ./cmd/excsv
 ```
+
+Cross-platform builds:
+
+```powershell
+# Windows (PowerShell)
+.\makefile.ps1 build-all
+
+# Git Bash / WSL / macOS / Linux
+make build-all
+```
+
+Binaries land in `bin/` (see `Makefile` / `makefile.ps1`).
+
+## Continuous integration
+
+GitHub Actions runs on every **push to `main`** and on **pull requests targeting `main`**:
+
+1. **test** — fetch fixture corpus from [boligolov/excsv](https://github.com/boligolov/excsv), run `go test ./...`
+2. **build** — cross-compile for Windows, Linux, and macOS (amd64 + arm64)
+3. **bundle** — on push to `main`, combine all binaries into one artifact (`excsv-binaries`)
+
+### Setup (one-time)
+
+1. Push this repo to GitHub (Actions are enabled by default for public repos).
+2. Merge the workflow file (`.github/workflows/ci.yml`) into `main` — CI starts automatically.
+3. View runs: **GitHub repo → Actions** tab.
+4. Download built binaries: open a green workflow run on `main` → **Artifacts** → `excsv-binaries`.
+
+No secrets required for build/test. For GitHub Releases on tag push, add a release workflow later.
+
+> **Note:** `test/fixtures/` is gitignored locally; CI clones fixtures from upstream `boligolov/excsv`. To run tests fully offline, remove that line from `.gitignore` and commit your fixture tree.
 
 ## Usage
 
