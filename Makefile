@@ -7,26 +7,33 @@
 #   make test
 #   make clean
 
-BINARY     := excsv
-CMD        := ./cmd/excsv
-BIN_DIR    := bin
-MODULE     := github.com/boligolov/excsv-golang/internal/cli
+BINARY  := excsv
+CMD     := ./cmd/excsv
+BIN_DIR := bin
+
+# Import path from go.mod (do not hardcode — survives module renames/forks).
+CLI_PKG    := $(shell go list -f '{{.ImportPath}}' ./internal/cli)
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || powershell -NoProfile -Command "(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')")
-LDFLAGS    := -s -w -X $(MODULE).Version=0.2.0 -X $(MODULE).BuildTime=$(BUILD_TIME)
-GO_BUILD   := go build -trimpath -ldflags "$(LDFLAGS)"
+# Quote each -X separately so Unix shells do not split BuildTime on ':'.
+LDFLAGS  := -s -w '-X $(CLI_PKG).Version=0.2.0' '-X $(CLI_PKG).BuildTime=$(BUILD_TIME)'
+GO_BUILD = go build -trimpath -ldflags $(LDFLAGS)
 
 ifeq ($(OS),Windows_NT)
-	EXE     := .exe
-	LOCAL   := $(BIN_DIR)/$(BINARY).exe
-	RM      := powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue"
-	RMFILE  := powershell -NoProfile -Command "if (Test-Path '$(1)') { Remove-Item -Force '$(1)' -ErrorAction Stop }"
-	MKDIR   := powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$(BIN_DIR)' | Out-Null"
+	EXE   := .exe
+	LOCAL := $(BIN_DIR)/$(BINARY).exe
+	RM    := powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue"
+define RMFILE
+	powershell -NoProfile -Command "if (Test-Path '$(1)') { Remove-Item -Force '$(1)' -ErrorAction Stop }"
+endef
+	MKDIR := powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$(BIN_DIR)' | Out-Null"
 else
-	EXE     :=
-	LOCAL   := $(BIN_DIR)/$(BINARY)
-	RM      := rm -rf
-	RMFILE  := rm -f
-	MKDIR   := mkdir -p $(BIN_DIR)
+	EXE   :=
+	LOCAL := $(BIN_DIR)/$(BINARY)
+	RM    := rm -rf
+define RMFILE
+	rm -f '$(1)'
+endef
+	MKDIR := mkdir -p $(BIN_DIR)
 endif
 
 .PHONY: all build rebuild build-all test clean list \

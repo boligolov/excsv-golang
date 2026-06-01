@@ -18,7 +18,6 @@ $ErrorActionPreference = 'Stop'
 $Binary  = 'excsv'
 $Cmd     = './cmd/excsv'
 $BinDir  = 'bin'
-$Module  = 'github.com/boligolov/excsv-golang/internal/cli'
 
 $Platforms = @(
     @{ GOOS = 'windows'; GOARCH = 'amd64'; Out = "$Binary-windows-amd64.exe" },
@@ -29,9 +28,18 @@ $Platforms = @(
     @{ GOOS = 'darwin';  GOARCH = 'arm64'; Out = "$Binary-darwin-arm64" }
 )
 
+function Get-CliPackage {
+    $pkg = go list -f '{{.ImportPath}}' ./internal/cli
+    if ($LASTEXITCODE -ne 0) {
+        throw 'go list failed for ./internal/cli'
+    }
+    return $pkg.Trim()
+}
+
 function Get-LdFlags {
+    $module = Get-CliPackage
     $buildTime = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    return "-s -w -X ${Module}.Version=0.2.0 -X ${Module}.BuildTime=$buildTime"
+    return "-s -w -X ${module}.Version=0.2.0 -X ${module}.BuildTime=$buildTime"
 }
 
 function Get-NativePlatform {
