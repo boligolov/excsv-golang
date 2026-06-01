@@ -95,7 +95,7 @@ excsv zip unwrap data.excsv.zip -o data.excsv
 excsv zip peek data.excsv.zip
 ```
 
-Use `-` for stdin where supported. Global flags: `--strict` (default), `--lenient`, `--json`.
+Use `--strict` (default), `--lenient`, `--json`. All read commands require a FILE path (no stdin).
 
 ## Library
 

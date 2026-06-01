@@ -35,7 +35,7 @@ See also: [`sources_and_specifications.md`](sources_and_specifications.md).
 | --- | --- |
 | Reference implementation | Go is the primary track; Python parity follows the same fixture corpus |
 | Spec fidelity | Strict mode fails on every MUST violation; lenient mode collects warnings and continues where spec allows |
-| Pipeline-friendly CLI | stdin/stdout, `-` paths, exit codes, `--json` for machine output |
+| Pipeline-friendly CLI | stdout, `-o` output, exit codes, `--json` for machine output; FILE required on input |
 | Two storage forms | Plain text and row ZIP container with transparent read and explicit wrap/unwrap |
 | Fixture-green | Every `plain/*` and `zip/*` entry in `fixtures.yaml` passes before a wave is “done” |
 
@@ -206,7 +206,8 @@ Framework: **cobra**. Binary name: `excsv`. Output: `bin/excsv.exe` (Windows) vi
 | `--strict` / `--lenient` | Parse mode (default: strict) |
 | `--json` | Machine-readable output where supported |
 | `--clean-human-comments` | Drop `##` on read (default: preserve) |
-| `-` | stdin / stdout for file args and convert output |
+
+All read commands require a **FILE** argument; stdin input is not supported. Write commands may print to stdout when `-o` is omitted.
 
 Planned: `--in-place` (P1).
 
@@ -387,8 +388,7 @@ Import lenient: return `ImportResult{Doc, Warnings}` with padded/truncated rows.
 
 | Concern | Status |
 | --- | --- |
-| Stdin plain / convert input | Done (`-`) |
-| Stdin zip | Not done (A2) |
+| Stdin (plain or zip) | Not supported — FILE required on all read commands |
 | Atomic in-place (P1) | Not done |
 | `--json` | Partial (`validate`, `info`, `rows count`, `convert`) |
 | UTF-8 | Required on import; encoding header on ExCSV output |

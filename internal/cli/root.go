@@ -3,7 +3,6 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/boligolov/excsv-golang/pkg/excsv"
@@ -52,17 +51,6 @@ func NewRoot() *cobra.Command {
 }
 
 func loadDoc(cfg *config, path string) (*excsv.Document, error) {
-	if path == "-" {
-		data, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return nil, err
-		}
-		res, err := excsv.ParseBytes(data, cfg.parseOpts())
-		if err != nil {
-			return nil, err
-		}
-		return res.Doc, nil
-	}
 	res, err := excsv.ParseFile(path, cfg.parseOpts())
 	if err != nil {
 		return nil, err
@@ -85,11 +73,9 @@ func exitParseErr(err error) {
 	os.Exit(3)
 }
 
-func fileArg(args []string) string {
-	if len(args) > 0 {
-		return args[0]
-	}
-	return "-"
+func exitUserErr(msg string) {
+	fmt.Fprintf(os.Stderr, "%s\n", msg)
+	os.Exit(1)
 }
 
 func formName(f excsv.Form) string {
