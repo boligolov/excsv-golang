@@ -32,3 +32,36 @@ func verifyChecksum(dataSection string, cs *Checksum) error {
 	}
 	return nil
 }
+
+func (doc *Document) SerializeDataSection() string {
+	var b strings.Builder
+	d := doc.Header.Dialect()
+	if doc.Data.HasHeaderRow {
+		b.WriteString(joinCSVFields(doc.Data.HeaderRow, d))
+		b.WriteByte('\n')
+	}
+	for _, row := range doc.Data.Rows {
+		b.WriteString(joinCSVFields(row, d))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func ComputeDataChecksum(dataSection string, algorithm string) (string, error) {
+	return computeDataChecksum(dataSection, algorithm)
+}
+
+func (doc *Document) SetDataChecksum(algorithm string) error {
+	hex, err := ComputeDataChecksum(doc.SerializeDataSection(), algorithm)
+	if err != nil {
+		return fail(ErrHeaderInvalidValue, 0, err.Error())
+	}
+	value := algorithm + ":" + hex
+	doc.Header.Fields["checksum"] = value
+	alg, digest, err := parseChecksumField(value)
+	if err != nil {
+		return fail(ErrHeaderInvalidValue, 0, "invalid checksum")
+	}
+	doc.Header.Checksum = &Checksum{Algorithm: alg, Hex: digest}
+	return nil
+}

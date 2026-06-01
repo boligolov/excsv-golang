@@ -10,6 +10,25 @@ See also: [`sources_and_specifications.md`](sources_and_specifications.md).
 
 ---
 
+## 0. Current status (this repo)
+
+| Area | Status |
+| --- | --- |
+| Plain parse + serialize | Done — fixture corpus green |
+| Row ZIP read/write | Done — `pkg/excsv/zip`, transparent open |
+| Core CLI | Partial — see §5.2 implemented commands |
+| CSV/TSV import (I1) | Done — `excsv convert` + `ImportDelimited` |
+| ExCSV → plain data (I2) | Done — `excsv clean` |
+| Full command tree | Not done — column/sql/agg/checksum/freeze/diff/tidy deferred |
+| Streaming (A8–A10) | Not done |
+| `##` round-trip on serialize | Partial — parsed by default; `SerializeCanonical` does not yet re-emit `##` |
+
+**Module path:** `github.com/boligolov/excsv-golang` (see `go.mod`).
+
+**Build:** `makefile.ps1` / `Makefile` — `build`, `rebuild` (flush Go cache + `-a`), `build-all`. Local Windows build always targets native `windows/amd64` or `windows/arm64` (avoids `GOOS`/`GOARCH` leak after cross-compile). `excsv version` prints link-time build timestamp.
+
+---
+
 ## 1. Goals
 
 | Goal | Detail |
@@ -26,33 +45,36 @@ See also: [`sources_and_specifications.md`](sources_and_specifications.md).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  cmd/excsv          CLI (cobra): flags, I/O routing, exit   │
+│  cmd/excsv/main.go  CLI entry                               │
 ├─────────────────────────────────────────────────────────────┤
-│  internal/cli       Command handlers; thin orchestration    │
+│  internal/cli       Cobra commands, I/O, exit codes         │
+│    root.go          Global flags, loadDoc                   │
+│    commands.go      validate, info, cat, header, meta, …    │
+│    version.go       Version / BuildTime (ldflags)           │
 ├─────────────────────────────────────────────────────────────┤
 │  pkg/excsv          Public library API                      │
-│    document.go      Document model + open/parse/serialize   │
-│    header.go        #!excsv key=value parsing               │
-│    meta.go          #@, #column, #%, #$ , #csvw, ##         │
-│    csv.go           Dialect resolution + row decode/encode  │
-│    sql.go           Dialect resolution, DDL/DQL helpers     │
-│    checksum.go      LF-normalized data-section digests      │
-│    validate.go      M1 conformance + error/warning types    │
-│    canonical.go     A6 canonical byte order                 │
-│    stream.go        A8/A9/A10 streaming readers/writers     │
+│    document.go      Document, Header, MetaBlock, options    │
+│    parse.go         ParseBytes, parse algorithm             │
+│    open.go          ParseFile, ParsePath, zip dispatch      │
+│    serialize.go     SerializeCanonical (A6)                  │
+│    import.go        ImportDelimited — CSV/TSV → Document    │
+│    kv.go            #!excsv and #column key=value parsing   │
+│    dialect.go       Delimiter/quote resolution, defaults    │
+│    csv.go           split/join CSV fields (custom dialect)  │
+│    sql.go           #$ line parsing                         │
+│    checksum.go      Data-section SHA-256 (M2, M3)           │
+│    errors.go        ErrorKind enum (fixtures.yaml)          │
 ├─────────────────────────────────────────────────────────────┤
-│  pkg/excsv/zip      Row ZIP container (J1–J6)               │
-│    open.go          Primary entry locate + extract          │
-│    write.go         Wrap, comment builder, original-size    │
-│    comment.go       Peek / refresh ZIP comment              │
+│  pkg/excsv/zip      Row ZIP container (single zip.go)       │
+│    Extract, Wrap, locatePrimary, buildComment, …            │
 ├─────────────────────────────────────────────────────────────┤
-│  internal/fixtures  YAML manifest loader + test runner glue │
+│  internal/fixtures  YAML manifest loader + test assertions  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Dependency rule:** `cmd/` and `internal/cli` may import `pkg/excsv`; `pkg/excsv` must not import CLI code. ZIP layer depends on `pkg/excsv` for inner document semantics, not the reverse.
+**Not yet split out (planned):** `validate.go`, `stream.go`, dedicated zip `comment.go` / `write.go`.
 
-**Suggested module path:** `github.com/boligolov/excsv-golang` (adjust to actual module name in `go.mod`).
+**Dependency rule:** `cmd/` and `internal/cli` may import `pkg/excsv`; `pkg/excsv` must not import CLI code. ZIP layer depends on `pkg/excsv` for inner document semantics, not the reverse.
 
 ---
 
@@ -62,69 +84,86 @@ Central type representing one RF document (plain bytes or extracted inner file):
 
 ```go
 type Document struct {
-    Form       Form          // Plain | ZipInner (logical content always row-oriented)
-    Header     Header        // resolved defaults applied
-    Meta       MetaBlock     // ordered slices where order matters (#$, ## opt-in)
-    Data       DataSection   // header row + rows OR index-only rows
-    Source     SourceInfo    // path, zip envelope, comment snapshot
-    Raw        *RawCapture   // optional A10 passthrough bytes for Mode A
+    Form   Form        // Plain | ZipInner
+    Header Header      // resolved defaults applied
+    Meta   MetaBlock   // ordered slices where order matters (#$, ##)
+    Data   DataSection // header row + rows OR index-only rows
+    Source SourceInfo  // path, zip envelope, comment snapshot
 }
 
 type Header struct {
     Fields map[string]string // raw key=value from #!excsv
     // Resolved:
-    Version, Delim, Quote, Null, Encoding, Schema, SQLDialect string
-    HeaderRow bool            // header=1
-    Rows      *int            // optional declared count
-    Checksum  *Checksum       // algorithm + hex
+    Version, DelimName, QuoteName, Null, Encoding, Schema, SQLDialect string
+    Delim, Quote rune; QuoteEnabled, HeaderRow bool
+    Rows         *int
+    Checksum     *Checksum
     OriginalSize *int64       // required when Form is zip inner
+    HasMagicLine bool
 }
 
 type MetaBlock struct {
-    FileMeta   []KV            // #@ — last-wins map materialised from slice
-    Columns    []ColumnDef
-    Aggregations []Aggregation // name + positional values
-    SQL        []SQLStatement  // ordered; verb, dialect, version, payload
-    CSVW       *string
-    HumanComments []string     // ## — dropped unless PreserveHumanComments
+    FileMeta      []KV            // #@ — last-wins via upsertKV
+    Columns       []ColumnDef
+    Aggregations  []Aggregation
+    SQL           []SQLStatement  // ordered
+    CSVW          *string
+    HumanComments []string        // ## — preserved by default; dropped when ClearHumanComments
 }
 ```
 
-Parsing follows the algorithm in README-LLM § PARSING ALGORITHM. Serialization follows § SERIALIZATION ALGORITHM.
+Parsing follows README-LLM § PARSING ALGORITHM. Serialization follows § SERIALIZATION ALGORITHM.
 
 ### 3.1 Open dispatch (A1, J6)
 
 ```
-Open(path | stdin | []byte) → Document
-  1. If magic PK\x03\x04 OR extension .excsv.zip / .ecsv.zip → zip.Open
-  2. Else → parse as plain ExCSV
-  3. Extension is authoritative when path is known; magic sniff is optional convenience
+ParsePath(path, data, opts) → ParseResult
+  1. If .excsv.zip / .ecsv.zip extension OR PK\x03\x04 magic → zip.Extract → ParseBytes(inner)
+  2. Else → ParseBytes as plain ExCSV
+  3. .pack. paths → fail gracefully (pack not supported)
 ```
 
-For **stdin zip** (A2, J6): buffer to a seekable temp file (or memory if small), emit warning on stderr in lenient mode. Plain stdin streams line-at-a-time.
+Implemented in [`open.go`](../pkg/excsv/open.go). Stdin zip buffering (A2) not yet wired in CLI.
 
-### 3.2 Parse modes (A4, A5)
+### 3.2 Parse modes (A4, A5, A7)
 
 ```go
 type ParseOptions struct {
-    Strict bool
-    PreserveHumanComments bool // A7 opt-in for ##
+    Strict              bool
+    ClearHumanComments  bool // default false → preserve ##
+    ExpectZipInner      bool
+    ZipUncompressedSize int64
 }
 ```
 
-- **Strict:** MUST-fail conditions → return `*ParseError` with `ErrorKind` matching fixture enum.
-- **Lenient:** same errors become warnings where spec says SHOULD warn; continue if document is still structurally usable.
+CLI global flag `--clean-human-comments` maps to `ClearHumanComments` (opt-out; default preserves `##`).
 
-Shared **error kinds** (must match `fixtures.yaml` header): `header_missing_version`, `zip_original_size_mismatch`, etc.
+- **Strict:** MUST-fail → `*ParseError` with `ErrorKind` matching fixture enum; no partial doc.
+- **Lenient:** not fully wired for all warning paths; import path supports ragged-row pad/truncate with `Issue` warnings.
 
-### 3.3 Operating modes (feature catalog)
+### 3.3 Import (I1)
+
+```go
+type ImportOptions struct {
+    DelimName, QuoteName string // empty = sniff
+    NoHeader, AddColumns, Checksum, Strict bool
+    FileMeta   []KV
+    SourcePath string // extension hint for sniff
+}
+
+func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error)
+```
+
+Sniffs delimiter (comma/tab/pipe/semicolon) and quote style; builds `Document` with `version=0.2`, auto `rows=`, optional `#column` stubs and `checksum=sha256:…`.
+
+### 3.4 Operating modes (feature catalog)
 
 | Mode | Data scan | Typical commands |
 | --- | --- | --- |
-| **A — metadata-only** | No | `header get`, `meta set`, `column add`, `sql list`, `zip peek` |
-| **B — data-aware** | Yes | `rows count`, `agg compute`, `checksum verify`, `convert`, transforms |
+| **A — metadata-only** | No | `header list`, `meta list`, `zip peek` |
+| **B — data-aware** | Yes | `rows count`, `clean`, `convert`, `validate` |
 
-Mode B writes auto-sync derived fields when configured (P6): `rows=`, `checksum=`, `#%`, `#@exported`.
+Mode B auto-sync of `rows=`, `checksum=`, `#%` on write — planned (P6); partially available via `ImportOptions.Checksum` and `SetDataChecksum`.
 
 ---
 
@@ -132,149 +171,102 @@ Mode B writes auto-sync derived fields when configured (P6): `rows=`, `checksum=
 
 ### 4.1 `pkg/excsv` — core
 
-| Area | Spec section | Features |
+| Area | Files | Status |
 | --- | --- | --- |
-| Header parser | HEADER LINE | B1–B6 |
-| Meta parsers | META LINES, SQL SECTION, COLUMN SCHEMA, AGGREGATIONS | C*, D*, E*, F* |
-| CSV engine | DATA SECTION, DELIMITERS, QUOTING | G6, dialect for #% |
-| Checksum | CHECKSUM | M2, M3 |
-| Validate | ERROR HANDLING | M1 |
-| Canonical writer | SERIALIZATION ALGORITHM | A6, A7, O1–O5 |
-| Stream API | — | A8, A9, A10 |
+| Header + meta parse | `kv.go`, `parse.go`, `sql.go` | Done |
+| CSV dialect engine | `csv.go`, `dialect.go` | Done (custom; not `encoding/csv`) |
+| Canonical writer | `serialize.go` | Done (no `##` emit yet) |
+| Checksum | `checksum.go` | Done — verify on parse; compute on import |
+| CSV/TSV import | `import.go` | Done |
+| Open / zip dispatch | `open.go` | Done |
+| Validate helper | — | Via parse + `excsv validate` only |
+| Stream API (A8–A10) | — | Not started |
 
-**CSV engine:** use Go 1.x `encoding/csv` only when dialect matches its model; for `quote=none`, custom `#` delimiter, and `quote=#`, implement a small dialect-aware splitter/encoder aligned with spec (quoted fields single-line, no raw newlines).
-
-**Forward compatibility (P7, P8):** unknown header keys and unknown `#` lines → ignore. Reserved pack keys (`layout`, `mode`, `section-size`, `table-count`) and meta prefixes (`#table`, `#fk`) → ignore on read, never write.
+**Forward compatibility (P7, P8):** unknown header keys and unknown `#` lines → ignore. Reserved pack keys and `#table` / `#fk` → ignore on read, never write.
 
 ### 4.2 `pkg/excsv/zip` — row container (J1–J6)
 
-| Function | Feature |
+| Function | Status |
 | --- | --- |
-| `OpenArchive(path)` | J6 transparent open |
-| `LocatePrimary(cd)` | First `.excsv`/`.ecsv` entry; name = archive base or `data.excsv` |
-| `ExtractPrimary()` | Full read path |
-| `PeekComment()` | J3 — parse EOCD comment as ExCSV prefix |
-| `Wrap(inner []byte, opts)` | J1 — two-pass `original-size`, Deflate default |
-| `Unwrap(archive)` | J2 |
-| `RefreshComment(doc)` | J4 |
-| `VerifyOriginalSize()` | J5 |
-
-**ZIP writer requirements:** deterministic output for fixture generation (fixed `#@created`, stable ordering, no extra fields). Support Deflate (8), Store (0), BZIP2 (12) read; write Deflate by default.
-
-**Comment builder:** priority list from spec; truncate at line boundary; append `#@comment-truncated: 1` when truncated. Max 65535 bytes UTF-8.
-
-**Reject:** encrypted entries (`zip_encrypted`), unsupported compression (`zip_unsupported_compression`), missing/bad primary (`zip_primary_*`).
+| `Extract(archivePath, data)` | Done — primary entry, decompress, comment |
+| `Wrap(inner, entryName, comment)` | Done — two-pass `original-size`, deflate |
+| `locatePrimary`, `buildComment`, `truncateComment` | Done |
+| `RefreshComment` / dedicated peek API | Not exposed on CLI (`zip peek` uses Extract) |
 
 ---
 
 ## 5. CLI design
 
-Framework: **cobra** + **pflag**. Binary name: `excsv`.
+Framework: **cobra**. Binary name: `excsv`. Output: `bin/excsv.exe` (Windows) via `makefile.ps1`.
 
 ### 5.1 Global flags
 
 | Flag | Purpose |
 | --- | --- |
 | `--strict` / `--lenient` | Parse mode (default: strict) |
-| `--json` | Machine-readable output (P3) |
-| `--in-place` | Atomic rewrite via temp + rename (P1) |
-| `-` | stdin / stdout |
-| `--preserve-human-comments` | A7 round-trip for `##` |
+| `--json` | Machine-readable output where supported |
+| `--clean-human-comments` | Drop `##` on read (default: preserve) |
+| `-` | stdin / stdout for file args and convert output |
+
+Planned: `--in-place` (P1).
 
 Exit codes: `0` ok; `1` user error; `2` parse/validation failure; `3` I/O failure.
 
-### 5.2 Command tree (RF plain + zip)
+### 5.2 Command tree
 
-Commands grouped by user goal. Pack-only branches omitted.
+**Implemented today:**
 
 ```
 excsv
-├── open / cat              # debug: dump inner plain (unwrap zip transparently)
-├── validate                # M1 full conformance
-├── info / summary          # N1 compact summary
-├── header                  # B*
-│   ├── list
-│   ├── get KEY
-│   ├── set KEY=VAL
-│   └── unset KEY
-├── meta (@)                # C*
-│   ├── list
-│   ├── get KEY
-│   ├── set KEY: VAL
-│   ├── unset KEY
-│   └── import FILE
-├── column                  # D*
-│   ├── list
-│   ├── show NAME|INDEX
-│   ├── add ...
-│   ├── remove ...
-│   ├── rename ...
-│   └── reorder ...
-├── agg (%)                 # E*
-│   ├── list
-│   ├── get NAME
-│   ├── set ...
-│   ├── compute             # Mode B
-│   ├── verify              # Mode B
-│   └── clear
-├── sql ($)                 # F*
-│   ├── list [--verb ddl|dql] [--dialect D]
-│   ├── get N
-│   ├── append ...
-│   ├── ddl generate [--dialect D]
-│   └── ddl apply --dialect D   # emit ordered SQL to stdout (no DB execution)
-├── rows                    # G*
-│   ├── count
-│   ├── head N
-│   ├── tail N
-│   └── slice FROM:TO
-├── data
-│   ├── print               # G6 iterate rows
-│   └── get ROW COL         # G5 cell read
-├── convert                 # I*
-│   ├── from-csv
-│   ├── to-csv
-│   ├── to-tsv
-│   └── normalize           # I3 dialect/encoding/null
-├── zip                     # J*
-│   ├── wrap IN -o OUT.excsv.zip
-│   ├── unwrap IN.zip -o OUT.excsv
-│   ├── peek                  # comment-only
-│   └── refresh-comment
-├── checksum                # M2, M3
-│   ├── compute
-│   └── verify
-├── freeze                  # M6 one-shot finalize
-├── diff                    # M7, M8
-├── tidy                    # O8 repair + canonical sort
-└── version
+├── validate [file]         # M1 — parse check
+├── info [file]             # N1 summary (--json)
+├── cat [file]              # canonical inner document (unwraps zip)
+├── header
+│   ├── list [file]
+│   └── get KEY [file]
+├── meta
+│   └── list [file]
+├── rows
+│   └── count [file]
+├── clean [file]            # I2 — strip # lines, print data rows as CSV/TSV
+├── convert [file]          # I1 — CSV/TSV → ExCSV
+│   # flags: -o, --delim, --quote, --no-header, --columns,
+│   #        --checksum, --meta KEY:VAL, --zip
+├── zip
+│   ├── wrap INPUT -o OUT
+│   ├── unwrap INPUT.zip -o OUT
+│   └── peek INPUT.zip
+└── version                 # prints version + build timestamp
 ```
 
-**Output family rule:** transforms default to same form as input (plain → plain, zip → zip) unless `--output` / `-o` specifies otherwise. Wrapping plain → zip is explicit (`excsv zip wrap` or `convert --zip`).
+**Planned (not implemented):**
 
-**SQL execution:** out of scope. `sql ddl apply` prints statements; user pipes to `psql`, `mysql`, etc.
+```
+excsv
+├── header set/unset, meta get/set/import, column …, agg …, sql …
+├── rows head/tail/slice, data print/get
+├── convert normalize, to-tsv          # I3 — or separate commands
+├── zip refresh-comment
+├── checksum compute/verify, freeze, diff, tidy
+└── open (alias of cat)
+```
 
-### 5.3 Command → feature mapping (in-scope only)
+**Naming note:** I2 (ExCSV → delimited) is **`clean`**, not `convert to-csv`. I1 (delimited → ExCSV) is top-level **`convert`**.
 
-| Group | Feature IDs | Wave |
-| --- | --- | --- |
-| Core parse/serialize | A1–A7, A10 | 1 plain; zip adds A1≈, A10≈ |
-| Streaming | A8, A9 | 1 (plain); 2 (zip inner stream) |
-| Header | B1–B6 | 1 |
-| Meta `#@` | C1–C7 | 1 |
-| Columns | D1–D6 | 1 |
-| Aggregations | E1–E7 | 1–2 |
-| SQL `#$` | F1–F8 | 1 |
-| Data read | G1, G4, G6 | 1–2 |
-| Data transform | H1–H13 | later milestones (Mode B) |
-| Convert | I1–I3, I10 | 1–2 |
-| Zip container | J1–J6 | 2 |
-| Integrity | M1–M6, M8 | 1–2 |
-| Inspect | N1–N5 | 1–2 |
-| Cleanup | O1–O8 | 1–2 |
-| Cross-cutting | P1–P8 | throughout |
+**Output family rule:** `convert --zip` wraps output; otherwise plain `.excsv`. `clean` always prints delimited text to stdout.
 
-Deferred within RF: G2–G3, G5, G7 (optimised column/row access — functional via full scan first). H* transforms ship after core parse is green.
+### 5.3 Command → feature mapping
+
+| Group | Feature IDs | Wave | Repo status |
+| --- | --- | --- | --- |
+| Core parse/serialize | A1–A7 | 1–2 | Done (A7 partial: ## parse yes, serialize no) |
+| Import | I1 | 1 | Done |
+| Export data | I2 | 1 | Done (`clean`) |
+| Zip container | J1–J6 | 2 | Done (J4 CLI pending) |
+| Header / meta read | B*, C* partial | 1 | Partial |
+| Data read | G1 partial | 1 | `rows count` only |
+| Integrity CLI | M2–M3 | 1–2 | Library only |
+| Convert I3, H*, rest | — | 3+ | Not started |
 
 ---
 
@@ -284,87 +276,61 @@ Work in two waves per upstream plan. **Do not start wave 2 until wave 1 fixture 
 
 ### Phase 0 — scaffold
 
-- [ ] `go.mod`, `cmd/excsv/main.go`, cobra root
-- [ ] `pkg/excsv` types, error kinds enum mirroring YAML
-- [ ] `internal/fixtures` — load manifest, resolve paths to upstream `fixtures/` tree
-- [ ] CI: `go test ./...`, fixture runner skeleton
-- [ ] Sync fixture binary files from upstream (junction/submodule/copy into `test/fixtures/files/` or read from cloned sibling)
+- [x] `go.mod`, `cmd/excsv/main.go`, cobra root
+- [x] `pkg/excsv` types, error kinds enum mirroring YAML
+- [x] `internal/fixtures` — load manifest, resolve paths
+- [x] CI: `.github/workflows/ci.yml` — `go test ./...`, cross-build
+- [x] Fixture sync in CI (clone upstream `boligolov/excsv`)
 
 ### Phase 1 — plain row (wave 1)
 
-**Milestone 1.1 — parse only**
+**Milestone 1.1 — parse only** — [x]
 
-Implement parsing algorithm steps 1–6 for plain files:
+- Header, meta, data, strict errors, fixture runner
 
-- Header line + defaults (B1, B5, B6)
-- All meta kinds (#@, #column, #%, #$, #csvw, ## ignore)
-- Data section with dialect resolution
-- Strict/lenient + error kinds for plain invalid fixtures
+**Milestone 1.2 — serialize + round-trip** — [x]
 
-Deliverable: `TestFixtures_Plain_Parse` walks manifest `plain/valid/*` and `plain/invalid/*`.
+- `SerializeCanonical`, BOM/CRLF handling
 
-**Milestone 1.2 — serialize + round-trip**
+**Milestone 1.3 — validation & integrity** — [x] parse-time; [ ] dedicated checksum CLI
 
-- Canonical serialization (A6)
-- Round-trip tests on valid plain fixtures (A7)
-- BOM strip, CRLF acceptance, LF output (O1)
+- Checksum verify on parse; aggregation/column validation in parser
+- `excsv validate`
 
-**Milestone 1.3 — validation & integrity**
+**Milestone 1.4 — Mode A CLI** — [~] partial
 
-- Checksum compute/verify (M2, M3)
-- Aggregation arity validation (E1)
-- Column/header consistency (D6)
-- `excsv validate` command
+- [x] `header list/get`, `meta list`, `cat`
+- [ ] mutators, column/sql subcommands, in-place writes
 
-**Milestone 1.4 — Mode A CLI**
+**Milestone 1.5 — Mode B read + convert** — [~] partial
 
-- `header`, `meta`, `column`, `sql list/get/append`
-- Stream-passthrough for metadata edits (A10)
-- Atomic in-place writes (P1)
+- [x] `rows count`, `clean`, `convert` (from-csv)
+- [ ] `data print`, checksum/freeze CLI, agg compute
 
-**Milestone 1.5 — Mode B read + convert**
-
-- `rows count`, `data print`, `convert to-csv` / `from-csv`
-- Aggregation compute/verify (E3, E4)
-- `checksum compute`, `freeze`
-
-Target: all **36** plain valid + **26** plain invalid fixtures green.
+Target: all **36** plain valid + **26** plain invalid fixtures green — **done**.
 
 ### Phase 2 — row zip (wave 2)
 
-**Milestone 2.1 — zip read**
+**Milestone 2.1 — zip read** — [x]
 
-- Primary entry location rules
-- Extract + parse inner document
-- `original-size` vs central directory (J5)
-- Comment peek (J3) — advisory parse
-- Invalid zip fixtures green
+**Milestone 2.2 — zip write** — [x]
 
-**Milestone 2.2 — zip write**
+**Milestone 2.3 — zip CLI** — [~] partial
 
-- Wrap plain → zip (J1): two-pass header patch
-- Comment builder with truncation
-- Deterministic generator matching upstream `make_zip.ps1`
+- [x] `zip wrap`, `unwrap`, `peek`
+- [ ] `refresh-comment`
 
-**Milestone 2.3 — zip CLI**
+**Milestone 2.4 — zip + Mode B** — [x] basic
 
-- `zip wrap`, `zip unwrap`, `zip peek`, `zip refresh-comment`
-- Transparent open on `.excsv.zip` paths (J6)
-- Stdin zip via temp buffer (A2)
+- [x] `convert --zip`, transparent open on read paths
 
-**Milestone 2.4 — zip + Mode B**
-
-- Checksum survives re-wrap
-- `convert` and `freeze` preserve or target zip per flags
-
-Target: all **10** zip valid + **9** zip invalid fixtures green.
+Target: all **10** zip valid + **9** zip invalid fixtures green — **done**.
 
 ### Phase 3 — polish (still RF only)
 
-- Streaming row reader/writer (A8, A9) for large plain files
-- `diff`, `tidy`, `info --json`
-- H1–H4 basic transforms (filter, sort, select) — plain first, then zip
-- Performance: avoid full materialisation for Mode A zip peek
+- [ ] Streaming (A8, A9), `##` serialize round-trip
+- [ ] `diff`, `tidy`, full meta/column/sql/agg CLI
+- [ ] H1–H4 transforms
 
 ---
 
@@ -372,152 +338,99 @@ Target: all **10** zip valid + **9** zip invalid fixtures green.
 
 ### 7.1 Fixture-driven tests
 
-Primary integration test:
-
-```go
-func TestManifestFixtures(t *testing.T) {
-    manifest := fixtures.Load("test/fixtures/fixtures.yaml")
-    root := fixtures.ResolveRoot() // upstream fixtures/ directory
-    for _, fx := range manifest.Fixtures {
-        if !strings.HasPrefix(fx.ID, "plain/") && !strings.HasPrefix(fx.ID, "zip/") {
-            continue // skip pack
-        }
-        t.Run(fx.ID, func(t *testing.T) {
-            doc, result := excsv.ParseFile(filepath.Join(root, fx.ID), excsv.Strict)
-            fixtures.AssertExpectation(t, fx, result, doc)
-        })
-    }
-}
-```
-
-- Filter manifest: **only** `plain/*` and `zip/*` IDs.
-- Compare `expect.parse`, `expect.error_kind`, `expect.warnings`, spot-check fields (`header`, `meta`, `sql`, `comment`).
-- Negative tests: assert error kind matches exactly — not merely “an error occurred”.
+Implemented as `TestManifestFixtures` in [`pkg/excsv/fixtures_test.go`](../pkg/excsv/fixtures_test.go) — walks `plain/*` and `zip/*` in `fixtures.yaml`.
 
 ### 7.2 Unit tests
 
-| Package | Focus |
-| --- | --- |
-| `header` | key=value splitting, quoting, defaults |
-| `meta` | #% CSV split uses file delimiter; #$ key parsing |
-| `sql` | dialect resolution (F7), family match warnings |
-| `csv` | quote=none, quote=#, doubled quotes |
-| `checksum` | trailing newline sensitivity (fixtures 035, 036) |
-| `zip` | primary naming, comment truncation, compression methods |
+| Package | File | Focus |
+| --- | --- | --- |
+| `pkg/excsv` | `import_test.go` | Sniff, headers, columns, checksum, round-trip |
+| `pkg/excsv` | (inline) | CSV dialect, parse errors via fixtures |
+| `pkg/excsv/zip` | — | Covered indirectly by fixtures |
 
 ### 7.3 Golden / canonical bytes
 
-For selected valid fixtures (e.g. `001_minimal_header_only`), optional `*.canonical` sibling files — byte-exact output of canonical writer. Add when writer stabilises.
+Optional `*.canonical` siblings — not yet used.
 
 ### 7.4 Fixture file sync
 
-Manifest is local; binary fixtures live upstream. Options:
-
-1. **Git submodule** — `test/fixtures/upstream` → `boligolov/excsv/fixtures`
-2. **Junction** — Windows `mklink /J test\fixtures\files <path-to-upstream/fixtures>`
-3. **CI checkout** — sparse clone fixtures path in pipeline
-
-Document chosen approach in repo README when wired.
+CI clones upstream fixtures on each run; local `test/fixtures/` may be gitignored — see README.
 
 ---
 
 ## 8. Error and warning model
 
 ```go
-type ErrorKind string
-
-const (
-    ErrHeaderMissingVersion ErrorKind = "header_missing_version"
-    // ... mirror fixtures.yaml error_kinds exactly
-)
+type ErrorKind string // mirrors fixtures.yaml — see errors.go
 
 type Issue struct {
-    Kind    ErrorKind // or WarningKind
+    Kind    ErrorKind
     Message string
-    Line    int       // 1-based, 0 if unknown
+    Line    int // 1-based; 0 if unknown
 }
+
+type ParseError struct { Issue Issue }
 
 type ParseResult struct {
     Doc      *Document
-    Errors   []Issue
-    Warnings []Issue
+    Warnings []Issue // lenient/import paths only today
 }
 ```
 
-Strict mode: first MUST-class issue → return error, no partial doc (or return doc + error — pick one convention and keep consistent; lean: fail fast, no doc).
+Strict parse: return `(nil, *ParseError)` — fail fast, no doc.
 
-Lenient mode: populate `Warnings`, return doc if parse completed.
+Import lenient: return `ImportResult{Doc, Warnings}` with padded/truncated rows.
 
 ---
 
 ## 9. I/O and concurrency
 
-| Concern | Approach |
+| Concern | Status |
 | --- | --- |
-| Atomic in-place (P1) | Write `path.excsv.tmp`, fsync, `rename` over original |
-| Zip in-place | Rewrite archive to temp; rename — never partial central directory |
-| Stdin plain | Buffered line reader; stream rows for `data print` |
-| Stdin zip | Temp file; warn once |
-| `--json` | Structured schema: `{ "ok": true, "header": {...}, "warnings": [] }` |
-| Encoding (P5) | Read declared encoding; UTF-8 default; re-emit UTF-8 |
-
-No server mode, no background daemon.
+| Stdin plain / convert input | Done (`-`) |
+| Stdin zip | Not done (A2) |
+| Atomic in-place (P1) | Not done |
+| `--json` | Partial (`validate`, `info`, `rows count`, `convert`) |
+| UTF-8 | Required on import; encoding header on ExCSV output |
 
 ---
 
-## 10. Dependencies (initial)
+## 10. Dependencies
 
 | Module | Use |
 | --- | --- |
 | `github.com/spf13/cobra` | CLI |
 | `gopkg.in/yaml.v3` | Fixture manifest |
-| `archive/zip` | stdlib — row container; evaluate if ZIP64 edge cases need `github.com/klauspost/compress/zip` |
+| `archive/zip` | Row container |
 | `crypto/sha256` | Checksum |
-| `golang.org/x/text` | Encoding transforms (non-UTF-8 fixtures) |
 
-Avoid heavy DB or query engines. Keep stdlib-first.
+Stdlib-first; no `golang.org/x/text` yet (UTF-8 only in practice).
 
 ---
 
 ## 11. Explicit non-goals
 
-| Item | Reason |
-| --- | --- |
-| `.excsv.pack.zip` | Wave 3+; reserved names only (P8) |
-| `#table`, `#fk` meta | Pack manifest |
-| Embedded SQL execution | Catalog § “NOT in this catalog” |
-| Encryption | Not in v0.2 |
-| Plugin protocol | Future document |
-| Automatic pack detection | CLI surface for packs will be explicit later (`excsv pack ...`) |
-
-If a user opens a `.excsv.pack.zip`: treat as ZIP, fail gracefully (“pack format not supported”) rather than mis-parsing as row zip.
+Unchanged — see prior plan. Pack format, `#table`/`#fk`, SQL execution, encryption, plugins.
 
 ---
 
 ## 12. Success criteria
 
-| Wave | Done when |
-| --- | --- |
-| **1 — plain** | All `plain/valid/*` + `plain/invalid/*` fixtures pass; `excsv validate`, `convert`, Mode A meta/column/sql commands work on plain files |
-| **2 — zip** | All `zip/valid/*` + `zip/invalid/*` fixtures pass; wrap/unwrap/peek/refresh; transparent open; stdin zip with temp fallback |
-| **RF complete** | Waves 1–2 green; README with install + cookbook pointers; library importable as `pkg/excsv` |
+| Wave | Done when | Status |
+| --- | --- | --- |
+| **1 — plain** | Fixtures green; validate, convert, basic read CLI | **Done** |
+| **2 — zip** | Zip fixtures green; wrap/unwrap/peek; transparent open | **Done** |
+| **RF complete** | Waves 1–2 + README + importable `pkg/excsv` | **Core done**; full CLI tree remains |
 
 ---
 
-## 13. Suggested first PR sequence
+## 13. Suggested next PR sequence
 
-1. Module scaffold + error kinds + header/meta parsers + plain valid 001–009
-2. Complete plain parse (all valid/invalid fixtures)
-3. Canonical writer + round-trip
-4. `validate`, `header`, `meta`, `column`, `sql list`
-5. Checksum + aggregation validation
-6. `convert`, `rows`, `data print`
-7. `pkg/excsv/zip` read + zip invalid fixtures
-8. Zip write + generator + zip valid fixtures
-9. Zip CLI commands + transparent open
-10. `freeze`, `tidy`, `diff`, streaming optimisations
-
-Each PR should cite feature IDs from the manifest fixtures it enables.
+1. Emit `HumanComments` in `SerializeCanonical` (A7 round-trip)
+2. `checksum compute/verify` CLI
+3. `header set`, `meta set`, column/sql read subcommands
+4. `data print`, streaming reader
+5. `zip refresh-comment`, `freeze`, `tidy`, `diff`
 
 ---
 

@@ -11,10 +11,10 @@ import (
 )
 
 type config struct {
-	strict                bool
-	lenient               bool
-	jsonOut               bool
-	preserveHumanComments bool
+	strict             bool
+	lenient            bool
+	jsonOut            bool
+	cleanHumanComments bool
 }
 
 func (c config) parseOpts() excsv.ParseOptions {
@@ -22,7 +22,7 @@ func (c config) parseOpts() excsv.ParseOptions {
 	if c.lenient {
 		opts.Strict = false
 	}
-	opts.PreserveHumanComments = c.preserveHumanComments
+	opts.ClearHumanComments = c.cleanHumanComments
 	return opts
 }
 
@@ -36,7 +36,7 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().BoolVar(&cfg.strict, "strict", true, "fail on spec violations")
 	root.PersistentFlags().BoolVar(&cfg.lenient, "lenient", false, "collect warnings and continue")
 	root.PersistentFlags().BoolVar(&cfg.jsonOut, "json", false, "machine-readable output")
-	root.PersistentFlags().BoolVar(&cfg.preserveHumanComments, "preserve-human-comments", false, "keep ## comments on rewrite")
+	root.PersistentFlags().BoolVar(&cfg.cleanHumanComments, "clean-human-comments", false, "drop ## comments on read/rewrite")
 
 	root.AddCommand(newValidateCmd(cfg))
 	root.AddCommand(newInfoCmd(cfg))
@@ -44,6 +44,7 @@ func NewRoot() *cobra.Command {
 	root.AddCommand(newHeaderCmd(cfg))
 	root.AddCommand(newMetaCmd(cfg))
 	root.AddCommand(newRowsCmd(cfg))
+	root.AddCommand(newCleanCmd(cfg))
 	root.AddCommand(newConvertCmd(cfg))
 	root.AddCommand(newZipCmd(cfg))
 	root.AddCommand(newVersionCmd())

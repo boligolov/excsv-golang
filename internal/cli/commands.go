@@ -80,7 +80,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("excsv-cli 0.2.0")
+			fmt.Printf("excsv-cli %s (built %s)\n", Version, BuildTime)
 		},
 	}
 }
@@ -168,10 +168,11 @@ func newRowsCmd(cfg *config) *cobra.Command {
 	return cmd
 }
 
-func newConvertCmd(cfg *config) *cobra.Command {
-	cmd := &cobra.Command{Use: "convert", Short: "Convert to/from ExCSV"}
-	cmd.AddCommand(&cobra.Command{
-		Use: "to-csv [file]", Args: cobra.MaximumNArgs(1),
+func newCleanCmd(cfg *config) *cobra.Command {
+	return &cobra.Command{
+		Use:   "clean [file]",
+		Short: "Strip ExCSV metadata and print plain CSV/TSV data",
+		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			doc, err := loadDoc(cfg, fileArg(args))
 			if err != nil {
@@ -185,8 +186,103 @@ func newConvertCmd(cfg *config) *cobra.Command {
 				fmt.Println(excsv.JoinCSVFields(row, d))
 			}
 		},
-	})
-	return cmd
+	}
+}
+
+func newConvertCmd(cfg *config) *cobra.Command {
+	var out, delim, quote string
+	var noHeader, addColumns, checksum, asZip bool
+	var meta []string
+
+	c := &cobra.Command{
+		Use:   "convert [file]",
+		Short: "Create ExCSV from CSV/TSV",
+		Args:  cobra.MaximumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			path := fileArg(args)
+			data, err := readInputBytes(path)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
+				os.Exit(3)
+			}
+			opts := excsv.ImportOptions{
+				DelimName:  delim,
+				QuoteName:  quote,
+				NoHeader:   noHeader,
+				AddColumns: addColumns,
+				Checksum:   checksum,
+				Strict:     !cfg.lenient,
+				SourcePath: path,
+			}
+			for _, m := range meta {
+				key, val, ok := strings.Cut(m, ":")
+				if !ok {
+					fmt.Fprintf(os.Stderr, "invalid --meta %q (expected KEY:VAL)\n", m)
+					os.Exit(1)
+				}
+				key = strings.TrimSpace(key)
+				val = strings.TrimSpace(val)
+				opts.FileMeta = append(opts.FileMeta, excsv.KV{Key: key, Value: val})
+			}
+			res, err := excsv.ImportDelimited(data, opts)
+			if err != nil {
+				exitParseErr(err)
+			}
+			for _, w := range res.Warnings {
+				fmt.Fprintf(os.Stderr, "warning: %s\n", w.Error())
+			}
+			serialized, err := res.Doc.SerializeCanonical()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
+				os.Exit(3)
+			}
+			if asZip {
+				entry := "data.excsv"
+				if path != "-" {
+					base := filepath.Base(path)
+					entry = strings.TrimSuffix(base, filepath.Ext(base)) + ".excsv"
+				}
+				serialized, err = excsvzip.Wrap(serialized, entry, "")
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "%v\n", err)
+					os.Exit(3)
+				}
+			}
+			if err := writeOutputBytes(out, serialized); err != nil {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
+				os.Exit(3)
+			}
+			if cfg.jsonOut {
+				_ = writeJSON(map[string]any{
+					"ok": true, "rows": res.Doc.RowCount(), "form": formName(res.Doc.Form),
+				})
+			}
+		},
+	}
+	c.Flags().StringVarP(&out, "output", "o", "", "output path (default stdout)")
+	c.Flags().StringVar(&delim, "delim", "", "delimiter: comma, tab, pipe, semicolon, or single character")
+	c.Flags().StringVar(&quote, "quote", "", "quote style: none, double, single, or single character")
+	c.Flags().BoolVar(&noHeader, "no-header", false, "treat all rows as data (header=0)")
+	c.Flags().BoolVar(&addColumns, "columns", false, "emit #column name=X type=text from header row")
+	c.Flags().BoolVar(&checksum, "checksum", false, "set checksum=sha256:... on output")
+	c.Flags().StringArrayVar(&meta, "meta", nil, "add #@ metadata (KEY:VAL, repeatable)")
+	c.Flags().BoolVar(&asZip, "zip", false, "wrap output as .excsv.zip")
+	return c
+}
+
+func readInputBytes(path string) ([]byte, error) {
+	if path == "-" {
+		return io.ReadAll(os.Stdin)
+	}
+	return os.ReadFile(path)
+}
+
+func writeOutputBytes(path string, data []byte) error {
+	if path == "" || path == "-" {
+		_, err := os.Stdout.Write(data)
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 func newZipCmd(cfg *config) *cobra.Command {

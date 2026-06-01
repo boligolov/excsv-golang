@@ -12,8 +12,26 @@ Supports **plain** (`.excsv`, `.ecsv`) and **row ZIP** (`.excsv.zip`, `.ecsv.zip
 ## Build
 
 ```powershell
-go build -o excsv.exe ./cmd/excsv
+# Fast local build -> bin\excsv.exe
+.\makefile.ps1
+
+# Flush Go cache + force full rebuild (use when changes don't show up)
+.\makefile.ps1 rebuild
+
+# Or manually:
+go build -trimpath -a -o bin/excsv.exe ./cmd/excsv
 ```
+
+Verify you picked up the new binary:
+
+```powershell
+.\bin\excsv.exe version
+# excsv-cli 0.2.0 (built 2026-06-01T12:34:56Z)
+```
+
+> If rebuild fails with "Cannot remove stale binary", close any running `excsv.exe` first — Windows locks the file while it's in use.
+>
+> **Wrong platform / exe won't start:** If you ran `build-all` in the same PowerShell session before an older `makefile.ps1`, `GOOS`/`GOARCH` could leak and produce a non-Windows `bin\excsv.exe`. Run `.\makefile.ps1 rebuild` (fixed in current script) or use `bin\excsv-windows-amd64.exe` directly.
 
 Cross-platform builds:
 
@@ -67,7 +85,9 @@ excsv meta list data.excsv
 
 # Data
 excsv rows count data.excsv
-excsv convert to-csv data.excsv
+excsv clean data.excsv
+excsv convert data.csv -o data.excsv
+excsv convert data.tsv -o data.excsv --columns
 
 # ZIP container
 excsv zip wrap data.excsv -o data.excsv.zip

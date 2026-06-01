@@ -88,10 +88,10 @@ type Header struct {
 }
 
 type ParseOptions struct {
-	Strict                bool
-	PreserveHumanComments bool
-	ExpectZipInner        bool
-	ZipUncompressedSize   int64
+	Strict              bool
+	ClearHumanComments  bool
+	ExpectZipInner      bool
+	ZipUncompressedSize int64
 }
 
 func StrictOptions() ParseOptions {

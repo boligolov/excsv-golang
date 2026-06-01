@@ -153,7 +153,7 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 			return nil, fail(ErrHeaderMalformedMagic, ln, "duplicate header line")
 		}
 		if strings.HasPrefix(line, "##") {
-			if opts.PreserveHumanComments {
+			if !opts.ClearHumanComments {
 				doc.Meta.HumanComments = append(doc.Meta.HumanComments, line)
 			}
 			lastWasSQL = false
