@@ -20,7 +20,9 @@ func TestManifestFixtures(t *testing.T) {
 		fx := fx
 		t.Run(fx.ID, func(t *testing.T) {
 			path := filepath.Join(fixtureRoot, filepath.FromSlash(fx.ID))
-			res, err := excsv.ParseFile(path, excsv.StrictOptions())
+			opts := excsv.StrictOptions()
+			opts.ExpectProfile = fx.Expect.Profile
+			res, err := excsv.ParseFile(path, opts)
 			fixtures.AssertExpectation(t, fx, res, err)
 		})
 	}

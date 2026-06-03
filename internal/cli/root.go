@@ -14,6 +14,7 @@ type config struct {
 	lenient            bool
 	jsonOut            bool
 	cleanHumanComments bool
+	expectProfile      string
 }
 
 func (c config) parseOpts() excsv.ParseOptions {
@@ -22,6 +23,7 @@ func (c config) parseOpts() excsv.ParseOptions {
 		opts.Strict = false
 	}
 	opts.ClearHumanComments = c.cleanHumanComments
+	opts.ExpectProfile = c.expectProfile
 	return opts
 }
 
@@ -36,6 +38,7 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().BoolVar(&cfg.lenient, "lenient", false, "collect warnings and continue")
 	root.PersistentFlags().BoolVar(&cfg.jsonOut, "json", false, "machine-readable output")
 	root.PersistentFlags().BoolVar(&cfg.cleanHumanComments, "clean-human-comments", false, "drop ## comments on read/rewrite")
+	root.PersistentFlags().StringVar(&cfg.expectProfile, "expect-profile", "", "validate as stub, sidecar, or sidecar_strict (fixture/testing)")
 
 	root.AddCommand(newValidateCmd(cfg))
 	root.AddCommand(newInfoCmd(cfg))
@@ -45,15 +48,23 @@ func NewRoot() *cobra.Command {
 	root.AddCommand(newRowsCmd(cfg))
 	root.AddCommand(newCleanCmd(cfg))
 	root.AddCommand(newConvertCmd(cfg))
+	root.AddCommand(newSQLCmd(cfg))
 	root.AddCommand(newZipCmd(cfg))
 	root.AddCommand(newVersionCmd())
 	return root
 }
 
-func loadDoc(cfg *config, path string) (*excsv.Document, error) {
-	res, err := excsv.ParseFile(path, cfg.parseOpts())
+func loadDoc(cfg *config, path string) (*excsv.ParseResult, error) {
+	return excsv.ParseFile(path, cfg.parseOpts())
+}
+
+func loadDocOnly(cfg *config, path string) (*excsv.Document, error) {
+	res, err := loadDoc(cfg, path)
 	if err != nil {
 		return nil, err
+	}
+	for _, w := range res.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w.Error())
 	}
 	return res.Doc, nil
 }

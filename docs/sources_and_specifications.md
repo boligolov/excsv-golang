@@ -60,25 +60,29 @@ Defines directory layout (`fixtures/plain|zip|pack/valid|invalid/`), naming (`NN
 
 **Authority:** expected outcomes per fixture; test runners walk this file, not the directory tree alone.
 
-Lists fixture IDs, which features they exercise, and expected parse result (ok / error kind / warnings). Actual `.excsv` files live in the upstream `fixtures/` tree (not yet vendored here beyond the manifest).
+Lists fixture IDs, which features they exercise, and expected parse result (ok / error kind / warnings). Actual `.excsv` (and sibling `.csv`/`.tsv`) files live in the upstream `fixtures/` tree; sync them locally with the scripts below (not committed — see `.gitignore`).
 
-**Use when:** implementing table-driven tests; pointing tests at upstream fixture files or a synced copy.
+**Use when:** implementing table-driven tests; `go test` reads `test/fixtures/` after sync.
 
 ## Local layout in this repo
 
 ```
 docs/
 ├── sources_and_specifications.md   ← this file
-└── downloaded/                     ← spec + plan snapshots (refresh from upstream)
+└── downloaded/                     ← spec + plan snapshots (gitignored; refresh from upstream)
     ├── README-LLM.md
     ├── plan-README.md
     ├── plan-01-features.md
     └── plan-02-fixtures.md
 
 test/
-└── fixtures/
-    └── fixtures.yaml               ← manifest only; .excsv files TBD from upstream tree
+└── fixtures/                       ← gitignored; sync from upstream
+    ├── fixtures.yaml               ← manifest (lists every fixture id + expect)
+    ├── plain/valid|invalid/        ← .excsv (+ sidecar siblings)
+    └── zip/valid|invalid/          ← .excsv.zip (wave 2)
 ```
+
+`scripts/sync-upstream.ps1` and `scripts/sync-upstream.sh` automate both doc snapshots and fixture files.
 
 ## What to refresh periodically (not often)
 
@@ -103,7 +107,53 @@ Refresh when upstream `boligolov/excsv` changes in ways that affect implementati
 4. **Parity** — same manifest drives Go and Python; divergence means spec ambiguity or a bug.
 5. **Before implementing** — read local snapshots; if stale, refresh downloads and skim upstream diff.
 
-## PowerShell refresh (Windows)
+## Refresh from upstream
+
+### One command (recommended)
+
+**Windows (PowerShell, repo root):**
+
+```powershell
+.\scripts\sync-upstream.ps1
+```
+
+**Git Bash / WSL / macOS / Linux:**
+
+```bash
+./scripts/sync-upstream.sh
+# or: make sync-upstream
+```
+
+This downloads all five spec/plan snapshots plus `fixtures.yaml`, then walks the manifest and fetches every `id:` path and `data_sibling:` path under `test/fixtures/`.
+
+Partial sync:
+
+```powershell
+.\scripts\sync-upstream.ps1 -SpecsOnly      # docs/downloaded + fixtures.yaml only
+.\scripts\sync-upstream.ps1 -FixturesOnly   # re-download .excsv/.zip files from existing manifest
+```
+
+```bash
+./scripts/sync-upstream.sh --specs-only
+./scripts/sync-upstream.sh --fixtures-only
+```
+
+### What the fixture sync downloads
+
+The script does **not** mirror the whole upstream `fixtures/` tree. It reads [`test/fixtures/fixtures.yaml`](../test/fixtures/fixtures.yaml) and downloads only:
+
+| Manifest field | Example | Local path |
+| --- | --- | --- |
+| `- id:` | `plain/valid/001_minimal_header_only.excsv` | `test/fixtures/plain/valid/001_….excsv` |
+| `data_sibling:` | `plain/valid/037_sidecar_csv_sibling.csv` | `test/fixtures/plain/valid/037_….csv` |
+
+Raw URL pattern: `https://raw.githubusercontent.com/boligolov/excsv/master/fixtures/<id>`.
+
+Pack fixtures (`pack/…`) are skipped until wave 3; the Go runner only exercises `plain/*` and `zip/*` today.
+
+### Manual / CI alternatives
+
+**Spec + manifest only (inline PowerShell):**
 
 ```powershell
 New-Item -ItemType Directory -Force -Path docs/downloaded, test/fixtures | Out-Null
@@ -116,4 +166,13 @@ New-Item -ItemType Directory -Force -Path docs/downloaded, test/fixtures | Out-N
 ) | ForEach-Object { Invoke-WebRequest -Uri $_.url -OutFile $_.out -UseBasicParsing }
 ```
 
-To pull fixture files, clone or sparse-checkout the upstream repo’s `fixtures/` directory (see `02-fixtures.md` for layout).
+**Full fixture tree (clone):** CI uses a shallow clone of [boligolov/excsv](https://github.com/boligolov/excsv) and copies `fixtures/plain` and `fixtures/zip` — see [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). Equivalent locally:
+
+```bash
+git clone --depth 1 https://github.com/boligolov/excsv.git /tmp/excsv-spec
+cp /tmp/excsv-spec/fixtures/fixtures.yaml test/fixtures/
+cp -r /tmp/excsv-spec/fixtures/plain test/fixtures/
+cp -r /tmp/excsv-spec/fixtures/zip test/fixtures/  # if present
+```
+
+See [`plan-02-fixtures.md`](downloaded/plan-02-fixtures.md) for directory layout and manifest schema.

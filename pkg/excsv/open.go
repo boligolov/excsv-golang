@@ -9,14 +9,22 @@ import (
 )
 
 func ParseFile(path string, opts ParseOptions) (*ParseResult, error) {
+	path = filepath.Clean(path)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
+	}
+	if sidecarPath, sideData, ok, err := discoverSidecarForData(path); err != nil {
+		return nil, err
+	} else if ok {
+		return parseResolvedPath(sidecarPath, sideData, opts)
 	}
 	return ParsePath(path, data, opts)
 }
 
 func ParsePath(path string, data []byte, opts ParseOptions) (*ParseResult, error) {
+	path = filepath.Clean(path)
+	opts.SourcePath = path
 	ext := strings.ToLower(filepath.Ext(path))
 	base := strings.ToLower(strings.TrimSuffix(filepath.Base(path), ext))
 	isRowZip := ext == ".zip" && (strings.HasSuffix(base, ".excsv") || strings.HasSuffix(base, ".ecsv"))
@@ -30,12 +38,20 @@ func ParsePath(path string, data []byte, opts ParseOptions) (*ParseResult, error
 		return parseZipPath(path, data, opts)
 	}
 
+	return parseResolvedPath(path, data, opts)
+}
+
+func parseResolvedPath(path string, data []byte, opts ParseOptions) (*ParseResult, error) {
+	opts.SourcePath = path
 	res, err := ParseBytes(data, opts)
 	if err != nil {
 		return nil, err
 	}
 	if res.Doc != nil {
 		res.Doc.Source.Path = path
+		if res.Doc.Source.SidecarPath == "" && headerReference(res.Doc.Header) != "" {
+			res.Doc.Source.SidecarPath = path
+		}
 	}
 	return res, nil
 }

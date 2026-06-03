@@ -9,7 +9,7 @@
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('build', 'rebuild', 'build-all', 'test', 'clean', 'list', 'help')]
+    [ValidateSet('build', 'rebuild', 'build-all', 'test', 'clean', 'list', 'help', 'sync-upstream', 'sync-specs', 'sync-fixtures')]
     [string]$Target = 'build'
 )
 
@@ -191,6 +191,19 @@ function Invoke-Test {
     go test ./...
 }
 
+function Invoke-SyncUpstream {
+    param([string[]]$ExtraArgs)
+    $script = Join-Path $PSScriptRoot 'scripts\sync-upstream.ps1'
+    & $script @ExtraArgs
+    # Child .ps1 does not set $LASTEXITCODE unless it calls exit; $? is reliable.
+    if (-not $?) {
+        throw 'sync-upstream failed'
+    }
+    if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+        throw "sync-upstream failed (exit $LASTEXITCODE)"
+    }
+}
+
 function Remove-Artifacts {
     if (Test-Path $BinDir) {
         Remove-Item -Recurse -Force $BinDir
@@ -209,6 +222,9 @@ Targets:
   rebuild     Flush Go cache + force full rebuild (-a)
   build-all   Cross-compile windows/linux/darwin amd64+arm64 -> bin\
   test        go test ./...
+  sync-upstream  Download spec snapshots + fixtures from boligolov/excsv
+  sync-specs     Spec snapshots + fixtures.yaml only
+  sync-fixtures  Fixture files from local fixtures.yaml
   clean       Remove bin\
   list        Show targets
   help        This message
@@ -224,8 +240,11 @@ switch ($Target) {
     'build'     { Build-Local }
     'rebuild'   { Invoke-Rebuild }
     'build-all' { Build-All }
-    'test'      { Invoke-Test }
-    'clean'     { Remove-Artifacts }
+    'test'           { Invoke-Test }
+    'sync-upstream'  { Invoke-SyncUpstream }
+    'sync-specs'     { Invoke-SyncUpstream -ExtraArgs @('-SpecsOnly') }
+    'sync-fixtures'  { Invoke-SyncUpstream -ExtraArgs @('-FixturesOnly') }
+    'clean'          { Remove-Artifacts }
     'list'      { Show-Help }
     'help'      { Show-Help }
 }

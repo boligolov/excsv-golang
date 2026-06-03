@@ -355,7 +355,7 @@ Optional `*.canonical` siblings — not yet used.
 
 ### 7.4 Fixture file sync
 
-CI clones upstream fixtures on each run; local `test/fixtures/` may be gitignored — see README.
+Run `.\scripts\sync-upstream.ps1` (Windows) or `make sync-upstream` / `./scripts/sync-upstream.sh` — downloads spec snapshots, `fixtures.yaml`, and every manifest `id` / `data_sibling` into `test/fixtures/`. CI clones the full upstream `fixtures/plain` and `fixtures/zip` trees instead; both approaches must yield the same bytes. Local `test/fixtures/` and `docs/downloaded/` are gitignored — see README and [`sources_and_specifications.md`](sources_and_specifications.md).
 
 ---
 

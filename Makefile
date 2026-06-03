@@ -49,6 +49,7 @@ endef
 endif
 
 .PHONY: all build rebuild build-all test clean list \
+	sync-upstream sync-specs sync-fixtures \
 	build-windows-amd64 build-windows-arm64 \
 	build-linux-amd64 build-linux-arm64 \
 	build-darwin-amd64 build-darwin-arm64
@@ -114,6 +115,15 @@ build-darwin-arm64: $(BIN_DIR)
 test:
 	go test ./...
 
+sync-upstream:
+	bash scripts/sync-upstream.sh
+
+sync-specs:
+	bash scripts/sync-upstream.sh --specs-only
+
+sync-fixtures:
+	bash scripts/sync-upstream.sh --fixtures-only
+
 clean:
 	$(RM) $(BIN_DIR)
 
@@ -123,4 +133,7 @@ list:
 	@echo   make rebuild     - flush Go cache + force full rebuild
 	@echo   make build-all   - windows, linux, macOS \(amd64 + arm64\)
 	@echo   make test
+	@echo   make sync-upstream   - download spec snapshots + fixtures from upstream
+	@echo   make sync-specs      - spec snapshots + fixtures.yaml only
+	@echo   make sync-fixtures   - fixture files from local fixtures.yaml
 	@echo   make clean

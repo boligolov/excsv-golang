@@ -1,8 +1,8 @@
 package excsv
 
 import (
-	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -26,9 +26,7 @@ type ImportResult struct {
 var columnNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 
 func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
-	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
-		data = data[3:]
-	}
+	data = stripUTF8BOM(data)
 	if len(data) > 0 && !utf8.Valid(data) {
 		return nil, fail(ErrInvalidUTF8, 0, "invalid UTF-8")
 	}
@@ -37,8 +35,7 @@ func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 		return minimalImportDoc()
 	}
 
-	lines, lineNums := splitImportLines(data)
-	lines, lineNums = trimTrailingEmptyLine(lines, lineNums)
+	lines, lineNums := linesFromRecords(splitRecords(data))
 
 	if allLinesEmpty(lines) {
 		return minimalImportDoc()
@@ -74,13 +71,13 @@ func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 		if err != nil {
 			return nil, wrapLineErr(err, lineNums[0])
 		}
-		if len(fields) > 0 && strings.HasPrefix(fields[0], "#") && !isFirstFieldQuoted(lines[0], d) {
-			return nil, fail(ErrFirstFieldHashUnquoted, lineNums[0], "first field starts with # unquoted")
+		if err := firstFieldHashError(lines[0], fields, d, lineNums[0]); err != nil {
+			return nil, err
 		}
 		headerRow = fields
 		expectedCols = len(fields)
 		for i := 1; i < len(lines); i++ {
-			row, w, err := parseImportRow(lines[i], lineNums[i], d, expectedCols, opts.Strict)
+			row, w, err := parseCSVRow(lines[i], lineNums[i], d, expectedCols, quoteName, opts.Strict)
 			if err != nil {
 				return nil, err
 			}
@@ -89,31 +86,22 @@ func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 		}
 	} else {
 		for i, line := range lines {
-			if expectedCols == 0 {
-				fields, err := splitCSVFields(line, d)
-				if err != nil {
-					return nil, wrapLineErr(err, lineNums[i])
-				}
-				if !d.QuoteEnabled && len(fields) > 0 && strings.HasPrefix(fields[0], "#") {
-					return nil, fail(ErrFirstFieldHashUnquoted, lineNums[i], "first field starts with # unquoted")
-				}
-				expectedCols = len(fields)
-				dataRows = append(dataRows, fields)
-				continue
-			}
-			row, w, err := parseImportRow(line, lineNums[i], d, expectedCols, opts.Strict)
+			row, w, err := parseCSVRow(line, lineNums[i], d, expectedCols, quoteName, opts.Strict)
 			if err != nil {
 				return nil, err
 			}
 			warnings = append(warnings, w...)
 			dataRows = append(dataRows, row)
+			if expectedCols == 0 && len(row) > 0 {
+				expectedCols = len(row)
+			}
 		}
 	}
 
 	fields := map[string]string{
 		"version": "0.2",
 		"delim":   delimName,
-		"rows":    itoa(len(dataRows)),
+		"rows":    strconv.Itoa(len(dataRows)),
 	}
 	if quoteName != "" && quoteName != "none" {
 		fields["quote"] = quoteName
@@ -144,7 +132,7 @@ func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 	}
 
 	if opts.AddColumns && hasHeader {
-		for i, name := range headerRow {
+		for _, name := range headerRow {
 			if !columnNameRE.MatchString(name) {
 				return nil, fail(ErrColumnMalformedAttribute, lineNums[0], "invalid column name "+name)
 			}
@@ -152,7 +140,6 @@ func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 				Attrs: map[string]string{"name": name, "type": "text"},
 				Line:  lineNums[0],
 			})
-			_ = i
 		}
 	}
 
@@ -163,76 +150,6 @@ func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 	}
 
 	return &ImportResult{Doc: doc, Warnings: warnings}, nil
-}
-
-func parseImportRow(line string, lineNo int, d Dialect, expectedCols int, strict bool) ([]string, []Issue, error) {
-	fields, err := splitCSVFields(line, d)
-	if err != nil {
-		return nil, nil, wrapLineErr(err, lineNo)
-	}
-	if !d.QuoteEnabled && len(fields) > 0 && strings.HasPrefix(fields[0], "#") {
-		return nil, nil, fail(ErrFirstFieldHashUnquoted, lineNo, "first field starts with # unquoted")
-	}
-	if expectedCols == 0 {
-		return fields, nil, nil
-	}
-	if len(fields) == expectedCols {
-		return fields, nil, nil
-	}
-	if strict {
-		if !d.QuoteEnabled && len(fields) > expectedCols {
-			return nil, nil, fail(ErrQuoteNoneDelimiterInValue, lineNo, "delimiter in unquoted value")
-		}
-		return nil, nil, fail(ErrDataRowArityMismatch, lineNo, fmtRowArity(len(fields), expectedCols))
-	}
-	var warnings []Issue
-	if len(fields) < expectedCols {
-		warnings = append(warnings, newIssue(ErrDataRowArityMismatch, lineNo,
-			"padded row from "+itoa(len(fields))+" to "+itoa(expectedCols)+" fields"))
-		for len(fields) < expectedCols {
-			fields = append(fields, "")
-		}
-	} else {
-		warnings = append(warnings, newIssue(ErrDataRowArityMismatch, lineNo,
-			"truncated row from "+itoa(len(fields))+" to "+itoa(expectedCols)+" fields"))
-		fields = fields[:expectedCols]
-	}
-	return fields, warnings, nil
-}
-
-func splitImportLines(data []byte) ([]string, []int) {
-	var lines []string
-	var nums []int
-	lineNo := 1
-	i := 0
-	for i <= len(data) {
-		start := i
-		j := i
-		for j < len(data) && data[j] != '\n' && data[j] != '\r' {
-			j++
-		}
-		lines = append(lines, string(data[start:j]))
-		nums = append(nums, lineNo)
-		lineNo++
-		if j >= len(data) {
-			break
-		}
-		if data[j] == '\r' {
-			j++
-		}
-		if j < len(data) && data[j] == '\n' {
-			j++
-		}
-		i = j
-	}
-	return lines, nums
-}
-
-func trimTrailingEmptyLine(lines []string, nums []int) ([]string, []int) {
-	if len(lines) > 1 && lines[len(lines)-1] == "" {
-		return lines[:len(lines)-1], nums[:len(nums)-1]
-	}
-	return lines, nums
 }
 
 var sniffDelims = []struct {
@@ -252,14 +169,7 @@ func resolveImportDelim(explicit string, lines []string, sourcePath string) (str
 		}
 		return explicit, nil
 	}
-	preferred := ""
-	lower := strings.ToLower(filepath.Base(sourcePath))
-	switch {
-	case strings.HasSuffix(lower, ".tsv"):
-		preferred = "tab"
-	case strings.HasSuffix(lower, ".csv"):
-		preferred = "comma"
-	}
+	preferred := delimNameForPath(sourcePath)
 
 	sample := nonEmptyLines(lines, 5)
 	if len(sample) == 0 {
@@ -347,18 +257,6 @@ func sniffQuote(line string, delim rune) string {
 		}
 	}
 	return "none"
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var digits []byte
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	return string(digits)
 }
 
 func minimalImportDoc() (*ImportResult, error) {

@@ -46,19 +46,21 @@ func (doc *Document) SerializeCanonical() ([]byte, error) {
 		b.WriteString("#%" + a.Name + ": " + joinCSVFields(a.Values, d))
 		b.WriteByte('\n')
 	}
-	if doc.Data.HasHeaderRow {
-		b.WriteString(joinCSVFields(doc.Data.HeaderRow, d))
-		b.WriteByte('\n')
-	}
-	for _, row := range doc.Data.Rows {
-		b.WriteString(joinCSVFields(row, d))
-		b.WriteByte('\n')
+	if doc.Source.Profile != ProfileSidecar && headerReference(doc.Header) == "" {
+		if doc.Data.HasHeaderRow {
+			b.WriteString(joinCSVFields(doc.Data.HeaderRow, d))
+			b.WriteByte('\n')
+		}
+		for _, row := range doc.Data.Rows {
+			b.WriteString(joinCSVFields(row, d))
+			b.WriteByte('\n')
+		}
 	}
 	return b.Bytes(), nil
 }
 
 func (doc *Document) buildCanonicalHeaderLine() string {
-	order := []string{"version", "delim", "quote", "header", "encoding", "null", "rows", "checksum", "schema", "csvw", "sql-dialect", "original-size"}
+	order := []string{"version", "delim", "quote", "header", "encoding", "null", "rows", "checksum", "schema", "csvw", "sql-dialect", "reference", "original-size"}
 	def := map[string]string{
 		"delim":    "comma",
 		"quote":    "none",

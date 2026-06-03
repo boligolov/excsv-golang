@@ -53,11 +53,23 @@ type DataSection struct {
 	Rows         [][]string
 }
 
+type Profile string
+
+const (
+	ProfileInline  Profile = "inline"
+	ProfileSidecar Profile = "sidecar"
+	ProfileStub    Profile = "stub"
+)
+
 type SourceInfo struct {
-	Path        string
-	ZipPath     string
-	Comment     string
-	PrimaryName string
+	Path          string
+	ZipPath       string
+	Comment       string
+	PrimaryName   string
+	Reference     string
+	ReferencePath string
+	SidecarPath   string
+	Profile       Profile
 }
 
 type Document struct {
@@ -92,14 +104,17 @@ type ParseOptions struct {
 	ClearHumanComments  bool
 	ExpectZipInner      bool
 	ZipUncompressedSize int64
+	SourcePath          string
+	ExpectProfile       string // stub, sidecar, sidecar_strict (fixture / explicit validation)
+	ResolveReference    bool   // load referenced data when reference= is set (default true)
 }
 
 func StrictOptions() ParseOptions {
-	return ParseOptions{Strict: true}
+	return ParseOptions{Strict: true, ResolveReference: true}
 }
 
 func LenientOptions() ParseOptions {
-	return ParseOptions{Strict: false}
+	return ParseOptions{Strict: false, ResolveReference: true}
 }
 
 type ParseResult struct {

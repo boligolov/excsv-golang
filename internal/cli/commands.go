@@ -19,7 +19,7 @@ func newValidateCmd(cfg *config) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			path := args[0]
-			if _, err := loadDoc(cfg, path); err != nil {
+			if _, err := loadDocOnly(cfg, path); err != nil {
 				exitParseErr(err)
 			}
 			if cfg.jsonOut {
@@ -37,20 +37,36 @@ func newInfoCmd(cfg *config) *cobra.Command {
 		Short: "Compact summary",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			doc, err := loadDoc(cfg, args[0])
+			res, err := loadDoc(cfg, args[0])
 			if err != nil {
 				exitParseErr(err)
 			}
+			doc := res.Doc
+			for _, w := range res.Warnings {
+				fmt.Fprintf(os.Stderr, "warning: %s\n", w.Error())
+			}
 			if cfg.jsonOut {
-				_ = writeJSON(map[string]any{
+				out := map[string]any{
 					"version": doc.Header.Version, "delim": doc.Header.DelimName,
 					"quote": doc.Header.QuoteName, "rows": doc.RowCount(),
 					"columns": len(doc.Meta.Columns), "form": formName(doc.Form),
-				})
+					"profile": string(doc.Source.Profile),
+				}
+				if doc.Source.Reference != "" {
+					out["reference"] = doc.Source.Reference
+				}
+				if doc.Source.ReferencePath != "" {
+					out["reference_path"] = doc.Source.ReferencePath
+				}
+				_ = writeJSON(out)
 				return
 			}
-			fmt.Printf("ExCSV %s  rows=%d  columns=%d  form=%s\n",
-				doc.Header.Version, doc.RowCount(), len(doc.Meta.Columns), formName(doc.Form))
+			line := fmt.Sprintf("ExCSV %s  rows=%d  columns=%d  form=%s  profile=%s",
+				doc.Header.Version, doc.RowCount(), len(doc.Meta.Columns), formName(doc.Form), doc.Source.Profile)
+			if doc.Source.Reference != "" {
+				line += fmt.Sprintf("  reference=%s", doc.Source.Reference)
+			}
+			fmt.Println(line)
 		},
 	}
 }
@@ -61,7 +77,7 @@ func newCatCmd(cfg *config) *cobra.Command {
 		Short: "Print canonical inner ExCSV document",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			doc, err := loadDoc(cfg, args[0])
+			doc, err := loadDocOnly(cfg, args[0])
 			if err != nil {
 				exitParseErr(err)
 			}
@@ -86,7 +102,7 @@ func newVersionCmd() *cobra.Command {
 }
 
 func runHeaderList(cfg *config, path string) {
-	doc, err := loadDoc(cfg, path)
+	doc, err := loadDocOnly(cfg, path)
 	if err != nil {
 		exitParseErr(err)
 	}
@@ -116,7 +132,7 @@ func headerGetPath(args []string) (key, path string, listOnly bool) {
 
 func headerArgLooksLikeFile(arg string) bool {
 	ext := strings.ToLower(filepath.Ext(arg))
-	if ext == ".excsv" || ext == ".ecsv" || ext == ".csv" || ext == ".tsv" || strings.HasSuffix(strings.ToLower(arg), ".zip") {
+	if ext == ".excsv" || ext == ".ecsv" || ext == ".extsv" || ext == ".csv" || ext == ".tsv" || strings.HasSuffix(strings.ToLower(arg), ".zip") {
 		return true
 	}
 	if _, err := os.Stat(arg); err == nil {
@@ -142,7 +158,7 @@ func newHeaderCmd(cfg *config) *cobra.Command {
 					runHeaderList(cfg, path)
 					return
 				}
-				doc, err := loadDoc(cfg, path)
+				doc, err := loadDocOnly(cfg, path)
 				if err != nil {
 					exitParseErr(err)
 				}
@@ -163,7 +179,7 @@ func newMetaCmd(cfg *config) *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use: "list FILE", Args: cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			doc, err := loadDoc(cfg, args[0])
+			doc, err := loadDocOnly(cfg, args[0])
 			if err != nil {
 				exitParseErr(err)
 			}
@@ -184,7 +200,7 @@ func newRowsCmd(cfg *config) *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use: "count FILE", Args: cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			doc, err := loadDoc(cfg, args[0])
+			doc, err := loadDocOnly(cfg, args[0])
 			if err != nil {
 				exitParseErr(err)
 			}
@@ -205,7 +221,7 @@ func newCleanCmd(cfg *config) *cobra.Command {
 		Short: "Strip ExCSV metadata and print plain CSV/TSV data",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			doc, err := loadDoc(cfg, args[0])
+			doc, err := loadDocOnly(cfg, args[0])
 			if err != nil {
 				exitParseErr(err)
 			}
@@ -307,6 +323,55 @@ func writeOutputBytes(path string, data []byte) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
+}
+
+func newSQLCmd(cfg *config) *cobra.Command {
+	var verb, dialect string
+	cmd := &cobra.Command{Use: "sql", Short: "SQL companion (#$) operations"}
+	list := &cobra.Command{
+		Use:   "list FILE",
+		Short: "List #$ddl / #$dql statements",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			doc, err := loadDocOnly(cfg, args[0])
+			if err != nil {
+				exitParseErr(err)
+			}
+			var out []map[string]string
+			for _, s := range doc.Meta.SQL {
+				if verb != "" && s.Verb != verb {
+					continue
+				}
+				eff := excsv.EffectiveDialect(s, doc.Header.SQLDialect)
+				if dialect != "" && !dialectMatches(eff, dialect) {
+					continue
+				}
+				entry := map[string]string{
+					"verb": s.Verb, "dialect": eff, "key": s.RawKey, "sql": s.Payload,
+				}
+				out = append(out, entry)
+				if !cfg.jsonOut {
+					fmt.Printf("#$%s [%s]: %s\n", s.RawKey, eff, s.Payload)
+				}
+			}
+			if cfg.jsonOut {
+				_ = writeJSON(out)
+			}
+		},
+	}
+	list.Flags().StringVar(&verb, "verb", "", "filter: ddl or dql")
+	list.Flags().StringVar(&dialect, "dialect", "", "filter by effective dialect (exact or family)")
+	cmd.AddCommand(list)
+	return cmd
+}
+
+func dialectMatches(effective, target string) bool {
+	if effective == target {
+		return true
+	}
+	eBase, _, _ := strings.Cut(effective, "-")
+	tBase, _, _ := strings.Cut(target, "-")
+	return eBase != "" && eBase == tBase
 }
 
 func newZipCmd(cfg *config) *cobra.Command {

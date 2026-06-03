@@ -35,6 +35,12 @@ const (
 	ErrZipCommentNotUTF8         ErrorKind = "zip_comment_not_utf8"
 	ErrZipUnsupportedCompression ErrorKind = "zip_unsupported_compression"
 	ErrZipEncrypted              ErrorKind = "zip_encrypted"
+	ErrSidecarHasDataSection     ErrorKind = "sidecar_has_data_section"
+	ErrSidecarMissingReference   ErrorKind = "sidecar_missing_reference"
+	ErrSidecarReferenceNotFound  ErrorKind = "sidecar_reference_not_found"
+	ErrSidecarDelimExtMismatch   ErrorKind = "sidecar_delim_ext_mismatch"
+	ErrSidecarChecksumMismatch   ErrorKind = "sidecar_checksum_mismatch"
+	ErrReferenceOnInline         ErrorKind = "reference_on_inline"
 )
 
 type Issue struct {

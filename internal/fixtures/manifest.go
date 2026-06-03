@@ -20,12 +20,14 @@ type Fixture struct {
 	ID           string   `yaml:"id"`
 	Exercises    []string `yaml:"exercises"`
 	DerivedFrom  string   `yaml:"derived_from"`
+	DataSibling  string   `yaml:"data_sibling"`
 	Expect       Expect   `yaml:"expect"`
 	SupersededBy string   `yaml:"superseded_by"`
 }
 
 type Expect struct {
 	Parse     string            `yaml:"parse"`
+	Profile   string            `yaml:"profile"`
 	Warnings  []string          `yaml:"warnings"`
 	ErrorKind string            `yaml:"error_kind"`
 	Header    map[string]string `yaml:"header"`
@@ -117,8 +119,16 @@ func AssertExpectation(t *testing.T, fx Fixture, res *excsv.ParseResult, err err
 				t.Fatalf("comment ends_with: got %q", c)
 			}
 		}
+		if fx.Expect.Profile != "" && string(doc.Source.Profile) != fx.Expect.Profile {
+			t.Fatalf("profile: got %q want %q", doc.Source.Profile, fx.Expect.Profile)
+		}
 		if len(fx.Expect.Warnings) == 0 && len(res.Warnings) > 0 {
 			t.Fatalf("unexpected warnings: %v", res.Warnings)
+		}
+		for _, w := range fx.Expect.Warnings {
+			if !warningKinds(res.Warnings, w) {
+				t.Fatalf("missing warning %q (got %v)", w, res.Warnings)
+			}
 		}
 		return
 	}
@@ -159,12 +169,26 @@ func headerField(doc *excsv.Document, key string) string {
 		}
 	case "sql-dialect":
 		return doc.Header.SQLDialect
+	case "reference":
+		if doc.Source.Reference != "" {
+			return doc.Source.Reference
+		}
+		return doc.Header.Fields["reference"]
 	case "csvw":
 		return doc.Header.Fields["csvw"]
 	case "schema":
 		return doc.Header.Schema
 	}
 	return ""
+}
+
+func warningKinds(warnings []excsv.Issue, kind string) bool {
+	for _, w := range warnings {
+		if string(w.Kind) == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func countSQL(doc *excsv.Document) (ddl, dql int) {

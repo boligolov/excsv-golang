@@ -2,12 +2,12 @@
 
 Go reference implementation of **excsv-cli** — a command-line tool and library for [ExCSV](https://github.com/boligolov/excsv) v0.2 (Extended CSV).
 
-Supports **plain** (`.excsv`, `.ecsv`) and **row ZIP** (`.excsv.zip`, `.ecsv.zip`) storage forms. Pack format (`.excsv.pack.zip`) is not implemented yet.
+Supports **plain** (`.excsv`, `.ecsv`, `.extsv` sidecars) and **row ZIP** (`.excsv.zip`, `.ecsv.zip`) storage forms. Pack format (`.excsv.pack.zip`) is not implemented yet.
 
 ## Requirements
 
 - Go 1.22+
-- Python 3 (optional — regenerate zip test fixtures)
+- Python 3 (optional — regenerate zip test fixtures upstream)
 
 ## Build
 
@@ -19,7 +19,7 @@ Supports **plain** (`.excsv`, `.ecsv`) and **row ZIP** (`.excsv.zip`, `.ecsv.zip
 .\makefile.ps1 rebuild
 
 # Or manually:
-go build -trimpath -a -o bin/excsv.exe ./cmd/excsv
+go build -trimpath -o bin/excsv.exe ./cmd/excsv
 ```
 
 Verify you picked up the new binary:
@@ -45,43 +45,142 @@ make build-all
 
 Binaries land in `bin/` (see `Makefile` / `makefile.ps1`).
 
+## Test fixtures
+
+The fixture corpus lives under `test/fixtures/` and is **not committed** to this repo (see `.gitignore`). CI and local tests expect it to be present.
+
+**Authority:** [boligolov/excsv](https://github.com/boligolov/excsv) — manifest at `fixtures/fixtures.yaml`, files under `fixtures/plain/` and `fixtures/zip/`.
+
+### Download (recommended)
+
+Sync spec snapshots, the manifest, and every file referenced by the manifest (`id` + `data_sibling`):
+
+```powershell
+.\scripts\sync-upstream.ps1
+# or:
+.\makefile.ps1 sync-upstream
+```
+
+```bash
+./scripts/sync-upstream.sh
+# or:
+make sync-upstream
+```
+
+Partial sync:
+
+| Command | Gets |
+| --- | --- |
+| `.\makefile.ps1 sync-specs` | `docs/downloaded/*.md` + `test/fixtures/fixtures.yaml` |
+| `.\makefile.ps1 sync-fixtures` | Fixture bytes only (needs `fixtures.yaml` already) |
+| `.\scripts\sync-upstream.ps1 -SpecsOnly` | Same as sync-specs |
+| `.\scripts\sync-upstream.ps1 -FixturesOnly` | Same as sync-fixtures |
+
+After sync you should have (among others):
+
+```
+test/fixtures/fixtures.yaml
+test/fixtures/plain/valid/*.excsv
+test/fixtures/plain/invalid/*.excsv
+test/fixtures/zip/valid/*.excsv.zip
+test/fixtures/zip/invalid/*.excsv.zip
+```
+
+Sidecar pairs also pull sibling `.csv` / `.tsv` files listed as `data_sibling` in the manifest.
+
+### Full upstream tree (optional)
+
+CI clones the entire `fixtures/plain` and `fixtures/zip` trees from upstream (not just manifest-listed paths). Equivalent locally:
+
+```bash
+git clone --depth 1 https://github.com/boligolov/excsv.git /tmp/excsv-spec
+cp /tmp/excsv-spec/fixtures/fixtures.yaml test/fixtures/
+cp -r /tmp/excsv-spec/fixtures/plain test/fixtures/
+cp -r /tmp/excsv-spec/fixtures/zip test/fixtures/
+```
+
+More detail: [`docs/sources_and_specifications.md`](docs/sources_and_specifications.md).
+
+## Testing
+
+**Prerequisite:** fixtures synced (see above).
+
+### Library + manifest (default)
+
+Runs `pkg/excsv` tests against `fixtures.yaml` — same expectations as upstream (parse ok/fail, error kinds, sidecar profiles):
+
+```powershell
+.\makefile.ps1 test
+# or:
+go test ./...
+```
+
+```bash
+make sync-upstream && make test
+```
+
+### Compiled CLI against fixtures
+
+Builds `bin/excsv` if needed, then runs `excsv validate` on every `plain/*` and `zip/*` manifest entry:
+
+```powershell
+.\makefile.ps1 build
+go test ./internal/cli -run TestCLIValidateFixtures -count=1
+```
+
+### Manual spot-check
+
+```powershell
+.\bin\excsv.exe validate test\fixtures\plain\valid\020_canonical_full_small.excsv
+.\bin\excsv.exe validate test\fixtures\plain\invalid\017_checksum_mismatch.excsv   # exit 2
+.\bin\excsv.exe info test\fixtures\plain\valid\037_sidecar_csv_sibling.excsv
+.\bin\excsv.exe info test\fixtures\plain\valid\037_sidecar_csv_sibling.csv      # discovers .excsv sidecar
+```
+
+When upstream adds or changes fixtures, re-sync then re-run both test paths:
+
+```powershell
+.\makefile.ps1 sync-fixtures
+.\makefile.ps1 test
+go test ./internal/cli -run TestCLIValidateFixtures -count=1
+```
+
 ## Continuous integration
 
-GitHub Actions runs on every **push to `main`** and on **pull requests targeting `main`**:
+GitHub Actions on **push to `main`** and **PRs to `main`**:
 
-1. **test** — fetch fixture corpus from [boligolov/excsv](https://github.com/boligolov/excsv), run `go test ./...`
-2. **build** — cross-compile for Windows, Linux, and macOS (amd64 + arm64)
-3. **bundle** — on push to `main`, combine all binaries into one artifact (`excsv-binaries`)
+1. **test** — shallow-clone [boligolov/excsv](https://github.com/boligolov/excsv) fixtures, `go test ./...`
+2. **build** — cross-compile Windows, Linux, macOS (amd64 + arm64)
+3. **bundle** — on push to `main`, artifact `excsv-binaries`
 
-### Setup (one-time)
+View runs: repo **Actions** tab. Download binaries: green run on `main` → **Artifacts**.
 
-1. Push this repo to GitHub (Actions are enabled by default for public repos).
-2. Merge the workflow file (`.github/workflows/ci.yml`) into `main` — CI starts automatically.
-3. View runs: **GitHub repo → Actions** tab.
-4. Download built binaries: open a green workflow run on `main` → **Artifacts** → `excsv-binaries`.
-
-No secrets required for build/test. For GitHub Releases on tag push, add a release workflow later.
-
-> **Note:** `test/fixtures/` is gitignored locally; CI clones fixtures from upstream `boligolov/excsv`. To run tests fully offline, remove that line from `.gitignore` and commit your fixture tree.
+No secrets required for build/test.
 
 ## Usage
+
+Use `.\bin\excsv.exe` locally, or `excsv` if on your `PATH`.
 
 ```powershell
 # Validate
 excsv validate data.excsv
 excsv validate archive.excsv.zip
 
-# Summary
+# Summary (sidecar: profile + reference= when applicable)
 excsv info data.excsv
 excsv info data.excsv --json
 
-# Print inner plain document (unwraps zip transparently)
+# Print canonical inner document (unwraps zip; sidecar emits meta only)
 excsv cat archive.excsv.zip
 
 # Header and metadata
 excsv header list data.excsv
 excsv header get version data.excsv
 excsv meta list data.excsv
+
+# SQL companions (#$ddl / #$dql)
+excsv sql list data.excsv
+excsv sql list data.excsv --verb ddl --dialect postgres
 
 # Data
 excsv rows count data.excsv
@@ -95,7 +194,9 @@ excsv zip unwrap data.excsv.zip -o data.excsv
 excsv zip peek data.excsv.zip
 ```
 
-Use `--strict` (default), `--lenient`, `--json`. All read commands require a FILE path (no stdin).
+**Sidecar:** open `sales.excsv` (meta + `reference=sales.csv`) or `sales.csv` (auto-discovers `sales.excsv` / `.extsv` in the same directory). Data commands use the merged logical document.
+
+**Flags:** `--strict` (default), `--lenient`, `--json`, `--clean-human-comments`. `--expect-profile` (`stub` | `sidecar` | `sidecar_strict`) is for fixture-style validation. All read commands require a FILE path (no stdin).
 
 ## Library
 
@@ -109,33 +210,25 @@ if err != nil {
 doc := res.Doc
 ```
 
+Opening `sales.csv` with a sibling `sales.excsv` loads the sidecar automatically. Set `ParseOptions.ExpectProfile` when you need sidecar-specific errors (e.g. missing `reference=`).
+
 Package layout:
 
 ```
 cmd/excsv/           CLI entry point
-internal/cli/        Cobra commands
-internal/fixtures/   Test manifest loader
+internal/cli/        Cobra commands + CLI fixture tests
+internal/fixtures/   Manifest loader (shared by library + CLI tests)
 pkg/excsv/           Core parser and serializer
 pkg/excsv/zip/       Row ZIP container
-test/fixtures/       Fixture corpus (plain + zip)
+test/fixtures/       Fixture corpus (gitignored; sync from upstream)
+docs/downloaded/     Spec snapshots (gitignored; sync from upstream)
 ```
-
-## Tests
-
-```powershell
-go test ./...
-
-# Regenerate zip fixtures (after changing plain sources)
-python test/fixtures/generate/make_zip_fixtures.py
-```
-
-Tests walk `test/fixtures/fixtures.yaml` and cover all `plain/*` and `zip/*` entries.
 
 ## Status
 
 | Wave | Scope | Status |
 | --- | --- | --- |
-| 1 | Plain `.excsv` parse, validate, basic CLI | Done |
+| 1 | Plain `.excsv` parse, validate, basic CLI, sidecar | Done |
 | 2 | Row `.excsv.zip` read/write, zip CLI | Done |
 | 3+ | Pack, transforms, full command tree | Not yet |
 

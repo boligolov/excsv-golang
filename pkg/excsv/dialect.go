@@ -137,7 +137,7 @@ func applyHeaderDefaults(h *Header) error {
 			}
 			h.Checksum = &Checksum{Algorithm: alg, Hex: hex}
 		}
-		if os, ok := h.Fields["original-size"]; ok {
+		if os, ok := h.Fields["original-size"]; ok && strings.TrimSpace(os) != "" {
 			n, err := parseInt64Field(os)
 			if err != nil {
 				return fail(ErrHeaderInvalidValue, 1, "invalid original-size="+os)

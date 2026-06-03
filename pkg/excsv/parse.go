@@ -8,9 +8,7 @@ import (
 )
 
 func ParseBytes(data []byte, opts ParseOptions) (*ParseResult, error) {
-	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
-		data = data[3:]
-	}
+	data = stripUTF8BOM(data)
 
 	enc := "UTF-8"
 	if firstLine := firstLineBytes(data); strings.HasPrefix(firstLine, "#!excsv") {
@@ -94,13 +92,14 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 	}
 	idx := 0
 
-	// skip trailing empty record from final newline for logic, but keep for checksum
-	for len(records) > 0 && records[len(records)-1].text == "" && len(records) > 1 {
-		records = records[:len(records)-1]
-	}
+	records = trimTrailingEmptyRecords(records)
 
 	if len(records) == 0 {
 		if err := applyHeaderDefaults(&doc.Header); err != nil {
+			return nil, err
+		}
+		doc.Source.Profile = ProfileStub
+		if err := validateExpectProfile(doc, opts.ExpectProfile); err != nil {
 			return nil, err
 		}
 		return &ParseResult{Doc: doc}, nil
@@ -128,8 +127,12 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 		if doc.Header.OriginalSize == nil {
 			return nil, fail(ErrZipMissingOriginalSize, 1, "missing original-size in zipped inner file")
 		}
-		if opts.ZipUncompressedSize > 0 && *doc.Header.OriginalSize != opts.ZipUncompressedSize {
-			return nil, fail(ErrZipOriginalSizeMismatch, 1, "original-size does not match ZIP entry size")
+		if opts.ZipUncompressedSize > 0 {
+			got := *doc.Header.OriginalSize
+			want := opts.ZipUncompressedSize
+			if got != want && got != want-3 && got+3 != want {
+				return nil, fail(ErrZipOriginalSizeMismatch, 1, "original-size does not match ZIP entry size")
+			}
 		}
 	}
 
@@ -221,60 +224,48 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 		idx++
 	}
 
+	ref := headerReference(doc.Header)
+	hasInlineData := false
+	for j := idx; j < len(records); j++ {
+		if records[j].text != "" {
+			hasInlineData = true
+			break
+		}
+	}
+	if ref != "" {
+		if hasInlineData {
+			if isLikelySidecarReference(opts.SourcePath, ref) {
+				return nil, fail(ErrSidecarHasDataSection, records[idx].num, "sidecar must not contain a data section")
+			}
+			return nil, fail(ErrReferenceOnInline, 1, "inline document must not set reference=")
+		}
+		return finishSidecarMeta(doc, opts)
+	}
+	if hasInlineData && ref == "" {
+		doc.Source.Profile = ProfileInline
+	}
+
 	dataRecords := records[idx:]
-	// drop single trailing empty line from data for row parsing but keep for checksum
 	parseRecords := dataRecords
 	if len(parseRecords) > 0 && parseRecords[len(parseRecords)-1].text == "" {
 		parseRecords = parseRecords[:len(parseRecords)-1]
 	}
 
-	colCount := 0
-	rowStart := 0
-	if doc.Header.HeaderRow && len(parseRecords) > 0 {
-		fields, err := splitCSVFields(parseRecords[0].text, d)
-		if err != nil {
-			return nil, wrapLineErr(err, parseRecords[0].num)
-		}
-		if len(fields) > 0 && strings.HasPrefix(fields[0], "#") && !isFirstFieldQuoted(parseRecords[0].text, d) {
-			return nil, fail(ErrFirstFieldHashUnquoted, parseRecords[0].num, "first field starts with # unquoted")
-		}
-		doc.Data.HasHeaderRow = true
-		doc.Data.HeaderRow = fields
-		colCount = len(fields)
-		rowStart = 1
-	} else if !doc.Header.HeaderRow {
-		colCount = columnCountFromSchema(doc.Meta.Columns)
+	schemaCols := 0
+	if !doc.Header.HeaderRow {
+		schemaCols = columnCountFromSchema(doc.Meta.Columns)
 	}
+	ds, _, colCount, _, err := buildDataSection(parseRecords, full, d, doc.Header.HeaderRow, doc.Header.Fields["quote"], schemaCols, idx, true)
+	if err != nil {
+		return nil, err
+	}
+	doc.Data = ds
 
 	if err := validateColumns(doc, colCount); err != nil {
 		return nil, err
 	}
-
-	expectedCols := effectiveColumnCount(doc, colCount)
-	for _, agg := range doc.Meta.Aggregations {
-		if expectedCols > 0 && len(agg.Values) != expectedCols {
-			return nil, fail(ErrAggArityMismatch, agg.Line, fmtAggArity(len(agg.Values), expectedCols))
-		}
-	}
-
-	for i := rowStart; i < len(parseRecords); i++ {
-		dl := parseRecords[i]
-		fields, err := splitCSVFields(dl.text, d)
-		if err != nil {
-			return nil, wrapLineErr(err, dl.num)
-		}
-		if !d.QuoteEnabled && len(fields) > 0 && strings.HasPrefix(fields[0], "#") {
-			return nil, fail(ErrFirstFieldHashUnquoted, dl.num, "first field starts with # unquoted")
-		}
-		if expectedCols > 0 {
-			if len(fields) != expectedCols {
-				if !d.QuoteEnabled && len(fields) > expectedCols && doc.Header.Fields["quote"] == "none" {
-					return nil, fail(ErrQuoteNoneDelimiterInValue, dl.num, "delimiter in unquoted value")
-				}
-				return nil, fail(ErrDataRowArityMismatch, dl.num, fmtRowArity(len(fields), expectedCols))
-			}
-		}
-		doc.Data.Rows = append(doc.Data.Rows, fields)
+	if err := validateDocAggregationArity(doc, colCount); err != nil {
+		return nil, err
 	}
 
 	if doc.Header.Rows != nil && len(doc.Data.Rows) != *doc.Header.Rows {
@@ -288,6 +279,12 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 		}
 	}
 
+	if !hasInlineData && ref == "" {
+		doc.Source.Profile = ProfileStub
+		if err := validateExpectProfile(doc, opts.ExpectProfile); err != nil {
+			return nil, err
+		}
+	}
 	_ = metaStart
 	return &ParseResult{Doc: doc}, nil
 }
