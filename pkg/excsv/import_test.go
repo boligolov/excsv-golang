@@ -193,6 +193,91 @@ func TestImportDelimited_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestImportDelimited_OutputDelimReencode(t *testing.T) {
+	input := "a,b\n\"1,2\",3\n"
+	res, err := excsv.ImportDelimited([]byte(input), excsv.ImportOptions{
+		Strict:    true,
+		DelimName: "pipe",
+		QuoteName: "double",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Doc.Header.DelimName != "pipe" {
+		t.Fatalf("header delim=%q", res.Doc.Header.DelimName)
+	}
+	out, err := res.Doc.SerializeCanonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "delim=pipe") {
+		t.Fatalf("missing delim=pipe in %q", string(out))
+	}
+	d := res.Doc.Header.Dialect()
+	gotHeader := excsv.JoinCSVFields(res.Doc.Data.HeaderRow, d)
+	if gotHeader != "a|b" {
+		t.Fatalf("header row=%q", gotHeader)
+	}
+	gotRow := excsv.JoinCSVFields(res.Doc.Data.Rows[0], d)
+	if gotRow != "1,2|3" {
+		t.Fatalf("data row=%q", gotRow)
+	}
+}
+
+func TestImportDelimited_OutputQuoteSingle(t *testing.T) {
+	res, err := excsv.ImportDelimited([]byte("id,msg\n1,\"a,b\"\n"), excsv.ImportOptions{
+		Strict:    true,
+		DelimName: "comma",
+		QuoteName: "single",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Doc.Header.QuoteName != "single" {
+		t.Fatalf("quote=%q", res.Doc.Header.QuoteName)
+	}
+	d := res.Doc.Header.Dialect()
+	got := excsv.JoinCSVFields(res.Doc.Data.Rows[0], d)
+	if got != `1,'a,b'` {
+		t.Fatalf("data row=%q", got)
+	}
+}
+
+func TestImportDelimited_Sidecar(t *testing.T) {
+	res, err := excsv.ImportDelimited([]byte("id,v\n1,2\n"), excsv.ImportOptions{
+		Strict:     true,
+		Sidecar:    true,
+		SourcePath: "dir/data.csv",
+		Reference:  "data.csv",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Doc.Source.Profile != excsv.ProfileSidecar {
+		t.Fatalf("profile=%q", res.Doc.Source.Profile)
+	}
+	if res.Doc.Source.Reference != "data.csv" {
+		t.Fatalf("reference=%q", res.Doc.Source.Reference)
+	}
+	if res.Doc.RowCount() != 0 {
+		t.Fatalf("sidecar should not embed rows, got %d", res.Doc.RowCount())
+	}
+	if res.Doc.Header.Rows == nil || *res.Doc.Header.Rows != 1 {
+		t.Fatalf("rows=%v", res.Doc.Header.Rows)
+	}
+	out, err := res.Doc.SerializeCanonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(out)
+	if strings.Contains(body, "id,v") || strings.Contains(body, "\n1,2") {
+		t.Fatalf("sidecar must not contain data section: %q", body)
+	}
+	if !strings.Contains(body, "reference=data.csv") {
+		t.Fatalf("missing reference: %q", body)
+	}
+}
+
 func TestImportDelimited_FileMeta(t *testing.T) {
 	res, err := excsv.ImportDelimited([]byte("a\n1\n"), excsv.ImportOptions{
 		Strict:   true,

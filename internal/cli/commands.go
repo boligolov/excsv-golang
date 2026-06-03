@@ -221,7 +221,20 @@ func newCleanCmd(cfg *config) *cobra.Command {
 		Short: "Strip ExCSV metadata and print plain CSV/TSV data",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			doc, err := loadDocOnly(cfg, args[0])
+			path := args[0]
+			if isSidecarInputPath(path) {
+				opts := cfg.parseOpts()
+				opts.ResolveReference = false
+				res, err := excsv.ParseFile(path, opts)
+				if err != nil {
+					exitParseErr(err)
+				}
+				if excsv.IsSidecarMetaOnly(res.Doc) {
+					printSidecarCleanNotice(res.Doc, path)
+					return
+				}
+			}
+			doc, err := loadDocOnly(cfg, path)
 			if err != nil {
 				exitParseErr(err)
 			}
@@ -236,14 +249,32 @@ func newCleanCmd(cfg *config) *cobra.Command {
 	}
 }
 
+func isSidecarInputPath(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".excsv" || ext == ".ecsv" || ext == ".extsv"
+}
+
+func printSidecarCleanNotice(doc *excsv.Document, _ string) {
+	ref := doc.Header.Fields["reference"]
+	if ref == "" {
+		ref = doc.Source.Reference
+	}
+	msg := "Hey — that's a sidecar file (metadata only"
+	if ref != "" {
+		msg += "; data is in " + ref
+	}
+	msg += "). clean does nothing useful here. If you don't need it, delete it."
+	fmt.Fprintln(os.Stderr, msg)
+}
+
 func newConvertCmd(cfg *config) *cobra.Command {
-	var out, delim, quote string
-	var noHeader, addColumns, checksum, asZip bool
+	var out, delim, quote, reference string
+	var noHeader, addColumns, checksum, asZip, sidecar bool
 	var meta []string
 
 	c := &cobra.Command{
 		Use:   "convert FILE",
-		Short: "Create ExCSV from CSV/TSV",
+		Short: "Create ExCSV from CSV/TSV (inline or sidecar)",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			path := args[0]
@@ -252,6 +283,9 @@ func newConvertCmd(cfg *config) *cobra.Command {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
 				os.Exit(3)
 			}
+			if sidecar && asZip {
+				exitUserErr("--sidecar cannot be combined with --zip")
+			}
 			opts := excsv.ImportOptions{
 				DelimName:  delim,
 				QuoteName:  quote,
@@ -259,6 +293,8 @@ func newConvertCmd(cfg *config) *cobra.Command {
 				AddColumns: addColumns,
 				Checksum:   checksum,
 				Strict:     !cfg.lenient,
+				Sidecar:    sidecar,
+				Reference:  reference,
 				SourcePath: path,
 			}
 			for _, m := range meta {
@@ -295,20 +331,35 @@ func newConvertCmd(cfg *config) *cobra.Command {
 					os.Exit(3)
 				}
 			}
-			if err := writeOutputBytes(out, serialized); err != nil {
+			dest := out
+			if dest == "" && sidecar {
+				dest = defaultSidecarPath(path)
+			}
+			if err := writeOutputBytes(dest, serialized); err != nil {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
 				os.Exit(3)
 			}
 			if cfg.jsonOut {
-				_ = writeJSON(map[string]any{
-					"ok": true, "rows": res.Doc.RowCount(), "form": formName(res.Doc.Form),
-				})
+				rows := res.Doc.RowCount()
+				if res.Doc.Header.Rows != nil {
+					rows = *res.Doc.Header.Rows
+				}
+				outJSON := map[string]any{
+					"ok": true, "rows": rows, "form": formName(res.Doc.Form),
+					"profile": string(res.Doc.Source.Profile),
+				}
+				if res.Doc.Source.Reference != "" {
+					outJSON["reference"] = res.Doc.Source.Reference
+				}
+				_ = writeJSON(outJSON)
 			}
 		},
 	}
-	c.Flags().StringVarP(&out, "output", "o", "", "output path (default stdout)")
-	c.Flags().StringVar(&delim, "delim", "", "delimiter: comma, tab, pipe, semicolon, or single character")
-	c.Flags().StringVar(&quote, "quote", "", "quote style: none, double, single, or single character")
+	c.Flags().StringVarP(&out, "output", "o", "", "output path (default stdout; with --sidecar: default <basename>.excsv or .extsv)")
+	c.Flags().StringVar(&delim, "delim", "", "output delimiter in #!excsv and inline data (input is auto-detected; comma, tab, pipe, semicolon, or one character)")
+	c.Flags().StringVar(&quote, "quote", "", "output quoting in #!excsv and inline data (none, double, single, or one character; doubles quotes inside values)")
+	c.Flags().BoolVar(&sidecar, "sidecar", false, "emit metadata-only sidecar with reference= pointing at FILE (data file unchanged)")
+	c.Flags().StringVar(&reference, "reference", "", "sidecar reference= path (default: basename of FILE)")
 	c.Flags().BoolVar(&noHeader, "no-header", false, "treat all rows as data (header=0)")
 	c.Flags().BoolVar(&addColumns, "columns", false, "emit #column name=X type=text from header row")
 	c.Flags().BoolVar(&checksum, "checksum", false, "set checksum=sha256:... on output")
@@ -363,6 +414,15 @@ func newSQLCmd(cfg *config) *cobra.Command {
 	list.Flags().StringVar(&dialect, "dialect", "", "filter by effective dialect (exact or family)")
 	cmd.AddCommand(list)
 	return cmd
+}
+
+func defaultSidecarPath(input string) string {
+	ext := strings.ToLower(filepath.Ext(input))
+	sideExt := ".excsv"
+	if ext == ".tsv" {
+		sideExt = ".extsv"
+	}
+	return strings.TrimSuffix(input, filepath.Ext(input)) + sideExt
 }
 
 func dialectMatches(effective, target string) bool {

@@ -1,6 +1,7 @@
 package excsv
 
 import (
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -8,12 +9,16 @@ import (
 )
 
 type ImportOptions struct {
-	DelimName  string // empty = sniff
-	QuoteName  string // empty = sniff
+	// DelimName / QuoteName describe the output ExCSV header (and inline data encoding).
+	// Input bytes are always parsed using detected dialect (sniff + SourcePath hint).
+	DelimName  string
+	QuoteName  string
 	NoHeader   bool
 	AddColumns bool
 	Checksum   bool
 	Strict     bool
+	Sidecar    bool
+	Reference  string // sidecar reference= path; default basename of SourcePath
 	FileMeta   []KV
 	SourcePath string
 }
@@ -41,24 +46,35 @@ func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 		return minimalImportDoc()
 	}
 
-	delimName, err := resolveImportDelim(opts.DelimName, lines, opts.SourcePath)
+	inputDelimName, err := resolveImportDelim("", lines, opts.SourcePath)
 	if err != nil {
 		return nil, err
 	}
-	delim, err := resolveDelim(delimName)
+	inputDelim, err := resolveDelim(inputDelimName)
 	if err != nil {
 		return nil, err
 	}
 
-	quoteName := opts.QuoteName
-	if quoteName == "" {
-		quoteName = sniffQuote(lines[0], delim)
-	}
-	quote, quoteEnabled, err := resolveQuote(quoteName)
+	inputQuoteName := sniffInputQuote(lines, inputDelim)
+	inputQuote, inputQuoteEnabled, err := resolveQuote(inputQuoteName)
 	if err != nil {
 		return nil, err
 	}
-	d := Dialect{Delim: delim, Quote: quote, QuoteEnabled: quoteEnabled}
+	inputD := Dialect{Delim: inputDelim, Quote: inputQuote, QuoteEnabled: inputQuoteEnabled}
+
+	outputDelimName := opts.DelimName
+	if outputDelimName == "" {
+		outputDelimName = inputDelimName
+	} else if _, err := resolveDelim(outputDelimName); err != nil {
+		return nil, err
+	}
+
+	outputQuoteName := opts.QuoteName
+	if outputQuoteName == "" {
+		outputQuoteName = inputQuoteName
+	} else if _, _, err := resolveQuote(outputQuoteName); err != nil {
+		return nil, err
+	}
 
 	hasHeader := !opts.NoHeader
 	var warnings []Issue
@@ -67,17 +83,17 @@ func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 	expectedCols := 0
 
 	if hasHeader {
-		fields, err := splitCSVFields(lines[0], d)
+		fields, err := splitCSVFields(lines[0], inputD)
 		if err != nil {
 			return nil, wrapLineErr(err, lineNums[0])
 		}
-		if err := firstFieldHashError(lines[0], fields, d, lineNums[0]); err != nil {
+		if err := firstFieldHashError(lines[0], fields, inputD, lineNums[0]); err != nil {
 			return nil, err
 		}
 		headerRow = fields
 		expectedCols = len(fields)
 		for i := 1; i < len(lines); i++ {
-			row, w, err := parseCSVRow(lines[i], lineNums[i], d, expectedCols, quoteName, opts.Strict)
+			row, w, err := parseCSVRow(lines[i], lineNums[i], inputD, expectedCols, inputQuoteName, opts.Strict)
 			if err != nil {
 				return nil, err
 			}
@@ -86,7 +102,7 @@ func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 		}
 	} else {
 		for i, line := range lines {
-			row, w, err := parseCSVRow(line, lineNums[i], d, expectedCols, quoteName, opts.Strict)
+			row, w, err := parseCSVRow(line, lineNums[i], inputD, expectedCols, inputQuoteName, opts.Strict)
 			if err != nil {
 				return nil, err
 			}
@@ -100,11 +116,11 @@ func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 
 	fields := map[string]string{
 		"version": "0.2",
-		"delim":   delimName,
+		"delim":   outputDelimName,
 		"rows":    strconv.Itoa(len(dataRows)),
 	}
-	if quoteName != "" && quoteName != "none" {
-		fields["quote"] = quoteName
+	if outputQuoteName != "" && outputQuoteName != "none" {
+		fields["quote"] = outputQuoteName
 	}
 	if !hasHeader {
 		fields["header"] = "0"
@@ -143,7 +159,24 @@ func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 		}
 	}
 
-	if opts.Checksum {
+	if opts.Sidecar {
+		ref := opts.Reference
+		if ref == "" {
+			ref = filepath.Base(opts.SourcePath)
+		}
+		doc.Source.Profile = ProfileSidecar
+		doc.Source.Reference = ref
+		doc.Source.SidecarPath = opts.SourcePath
+		doc.Header.Fields["reference"] = ref
+		doc.Data = DataSection{}
+		if opts.Checksum {
+			records := splitRecords(data)
+			section := extractDataSection(string(data), records, 0)
+			if err := doc.SetDataChecksumFromSection(section, "sha256"); err != nil {
+				return nil, err
+			}
+		}
+	} else if opts.Checksum {
 		if err := doc.SetDataChecksum("sha256"); err != nil {
 			return nil, err
 		}
@@ -242,6 +275,34 @@ func scoreDelimiter(lines []string, delim rune) int {
 		}
 	}
 	return first * len(counts)
+}
+
+func sniffInputQuote(lines []string, delim rune) string {
+	sample := nonEmptyLines(lines, 8)
+	if len(sample) == 0 {
+		return "none"
+	}
+	dq := Dialect{Delim: delim, Quote: '"', QuoteEnabled: true}
+	dn := Dialect{Delim: delim, QuoteEnabled: false}
+	doubleOK := true
+	noneOK := true
+	for _, line := range sample {
+		if strings.Contains(line, `"`) {
+			if _, err := splitCSVFields(line, dq); err != nil {
+				doubleOK = false
+			}
+		}
+		if _, err := splitCSVFields(line, dn); err != nil {
+			noneOK = false
+		}
+	}
+	if doubleOK && strings.Contains(strings.Join(sample, "\n"), `"`) {
+		return "double"
+	}
+	if noneOK {
+		return "none"
+	}
+	return sniffQuote(sample[0], delim)
 }
 
 func sniffQuote(line string, delim rune) string {

@@ -10,6 +10,14 @@ func headerReference(h Header) string {
 	return strings.TrimSpace(h.Fields["reference"])
 }
 
+// IsSidecarMetaOnly reports a metadata-only sidecar (reference= set, no inline data section).
+func IsSidecarMetaOnly(doc *Document) bool {
+	if doc == nil || headerReference(doc.Header) == "" {
+		return false
+	}
+	return len(doc.Data.Rows) == 0 && !doc.Data.HasHeaderRow
+}
+
 func isLikelySidecarReference(sidecarPath, ref string) bool {
 	if sidecarPath == "" {
 		return true
@@ -109,8 +117,8 @@ func finishSidecarMeta(doc *Document, opts ParseOptions) (*ParseResult, error) {
 		}
 	}
 
-	if !opts.ResolveReference || ref == "" {
-		if doc.Header.Rows != nil && *doc.Header.Rows != 0 {
+	if !opts.ResolveReference {
+		if ref == "" && doc.Header.Rows != nil && *doc.Header.Rows != 0 {
 			return nil, fail(ErrHeaderInvalidValue, 1, "rows= does not match data row count")
 		}
 		return &ParseResult{Doc: doc, Warnings: warnings}, nil

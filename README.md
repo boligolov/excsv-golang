@@ -187,6 +187,8 @@ excsv rows count data.excsv
 excsv clean data.excsv
 excsv convert data.csv -o data.excsv
 excsv convert data.tsv -o data.excsv --columns
+excsv convert data.csv --sidecar -o data.excsv          # metadata only; reference=data.csv
+excsv convert data.csv -o out.excsv --delim pipe --quote double   # re-encode inline data
 
 # ZIP container
 excsv zip wrap data.excsv -o data.excsv.zip

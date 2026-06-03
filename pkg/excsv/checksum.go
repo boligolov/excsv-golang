@@ -51,8 +51,8 @@ func ComputeDataChecksum(dataSection string, algorithm string) (string, error) {
 	return computeDataChecksum(dataSection, algorithm)
 }
 
-func (doc *Document) SetDataChecksum(algorithm string) error {
-	hex, err := ComputeDataChecksum(doc.SerializeDataSection(), algorithm)
+func (doc *Document) setChecksumFromSection(dataSection, algorithm string) error {
+	hex, err := ComputeDataChecksum(dataSection, algorithm)
 	if err != nil {
 		return fail(ErrHeaderInvalidValue, 0, err.Error())
 	}
@@ -64,4 +64,12 @@ func (doc *Document) SetDataChecksum(algorithm string) error {
 	}
 	doc.Header.Checksum = &Checksum{Algorithm: alg, Hex: digest}
 	return nil
+}
+
+func (doc *Document) SetDataChecksum(algorithm string) error {
+	return doc.setChecksumFromSection(doc.SerializeDataSection(), algorithm)
+}
+
+func (doc *Document) SetDataChecksumFromSection(dataSection, algorithm string) error {
+	return doc.setChecksumFromSection(dataSection, algorithm)
 }
