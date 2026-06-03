@@ -15,9 +15,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$Binary  = 'excsv'
-$Cmd     = './cmd/excsv'
-$BinDir  = 'bin'
+$Binary    = 'excsv'
+$GenBinary = 'gencsv'
+$Cmd       = './cmd/excsv'
+$GenCmd    = './cmd/gencsv'
+$BinDir    = 'bin'
 
 $Platforms = @(
     @{ GOOS = 'windows'; GOARCH = 'amd64'; Out = "$Binary-windows-amd64.exe" },
@@ -36,10 +38,24 @@ function Get-CliPackage {
     return $pkg.Trim()
 }
 
+function Get-GencsvPackage {
+    $pkg = go list -f '{{.ImportPath}}' ./internal/gencsv
+    if ($LASTEXITCODE -ne 0) {
+        throw 'go list failed for ./internal/gencsv'
+    }
+    return $pkg.Trim()
+}
+
 function Get-LdFlags {
     $module = Get-CliPackage
     $buildTime = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     return "-s -w -X ${module}.Version=0.2.0 -X ${module}.BuildTime=$buildTime"
+}
+
+function Get-GenLdFlags {
+    $module = Get-GencsvPackage
+    $buildTime = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    return "-s -w -X ${module}.Version=0.1.0 -X ${module}.BuildTime=$buildTime"
 }
 
 function Get-NativePlatform {
@@ -98,15 +114,16 @@ function Remove-StaleBinary {
 
 function Invoke-GoBuild {
     param(
+        [string]$Package,
+        [string]$LdFlags,
         [string]$Out,
         [switch]$ForceAll
     )
-    $ldFlags = Get-LdFlags
-    $args = @('build', '-trimpath', '-ldflags', $ldFlags, '-o', $Out)
+    $args = @('build', '-trimpath', '-ldflags', $LdFlags, '-o', $Out)
     if ($ForceAll) {
         $args += '-a'
     }
-    $args += $Cmd
+    $args += $Package
     & go @args
     if ($LASTEXITCODE -ne 0) {
         throw "go build failed with exit code $LASTEXITCODE"
@@ -117,14 +134,18 @@ function Build-Local {
     param([switch]$ForceAll)
     Ensure-BinDir
     $out = Join-Path $BinDir "$Binary.exe"
+    $genOut = Join-Path $BinDir "$GenBinary.exe"
     Remove-StaleBinary $out
+    Remove-StaleBinary $genOut
 
     $saved = Save-GoPlatform
     try {
         $native = Get-NativePlatform
         Use-GoPlatform $native.GOOS $native.GOARCH
-        Invoke-GoBuild -Out $out -ForceAll:$ForceAll
+        Invoke-GoBuild -Package $Cmd -LdFlags (Get-LdFlags) -Out $out -ForceAll:$ForceAll
         Write-Host "-> $out ($($native.GOOS)/$($native.GOARCH))"
+        Invoke-GoBuild -Package $GenCmd -LdFlags (Get-GenLdFlags) -Out $genOut -ForceAll:$ForceAll
+        Write-Host "-> $genOut ($($native.GOOS)/$($native.GOARCH))"
     }
     finally {
         Restore-GoPlatform $saved
@@ -140,7 +161,7 @@ function Build-Platform {
     $saved = Save-GoPlatform
     try {
         Use-GoPlatform $Platform.GOOS $Platform.GOARCH
-        Invoke-GoBuild -Out $out -ForceAll:$ForceAll
+        Invoke-GoBuild -Package $Cmd -LdFlags (Get-LdFlags) -Out $out -ForceAll:$ForceAll
         Write-Host "-> $out ($($Platform.GOOS)/$($Platform.GOARCH))"
     }
     finally {
@@ -184,7 +205,7 @@ excsv-cli build (PowerShell)
   .\makefile.ps1 [target]
 
 Targets:
-  build       Build for current Windows -> bin\excsv.exe (default)
+  build       Build excsv + gencsv for current Windows -> bin\ (default)
   rebuild     Flush Go cache + force full rebuild (-a)
   build-all   Cross-compile windows/linux/darwin amd64+arm64 -> bin\
   test        go test ./...
