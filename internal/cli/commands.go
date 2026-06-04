@@ -210,8 +210,30 @@ func newMetaCmd(cfg *config) *cobra.Command {
 			},
 		},
 		set,
+		&cobra.Command{
+			Use: "remove KEY", Args: cobra.ExactArgs(1),
+			Run: func(cmd *cobra.Command, args []string) {
+				runMetaRemove(cfg, args[0])
+			},
+		},
 	)
 	return cmd
+}
+
+func runMetaRemove(cfg *config, key string) {
+	path := targetPath()
+	doc, err := loadDocForMutation(cfg, path)
+	if err != nil {
+		exitParseErr(err)
+	}
+	if !doc.RemoveFileMeta(key) {
+		fmt.Fprintf(os.Stderr, "unknown meta key: %s\n", key)
+		os.Exit(1)
+	}
+	if err := saveDocument(cfg, doc, path); err != nil {
+		exitParseErr(err)
+	}
+	printMutationOK(cfg, path, key, nil)
 }
 
 func runMetaSet(cfg *config, key, value string) {
@@ -224,11 +246,7 @@ func runMetaSet(cfg *config, key, value string) {
 	if err := saveDocument(cfg, doc, path); err != nil {
 		exitParseErr(err)
 	}
-	if cfg.jsonOut {
-		_ = writeJSON(map[string]any{"ok": true, "path": path, "key": key})
-		return
-	}
-	fmt.Println("ok")
+	printMutationOK(cfg, path, key, nil)
 }
 
 func newRowsCmd(cfg *config) *cobra.Command {
@@ -463,8 +481,29 @@ func newSQLCmd(cfg *config) *cobra.Command {
 		},
 	}
 	set.Flags().StringVar(&value, "value", "", "SQL payload (use shell quotes for spaces)")
-	cmd.AddCommand(list, get, set)
+	cmd.AddCommand(list, get, set, &cobra.Command{
+		Use: "remove KEY", Args: cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			runSQLRemove(cfg, args[0])
+		},
+	})
 	return cmd
+}
+
+func runSQLRemove(cfg *config, key string) {
+	path := targetPath()
+	doc, err := loadDocForMutation(cfg, path)
+	if err != nil {
+		exitParseErr(err)
+	}
+	if !doc.RemoveSQL(key) {
+		fmt.Fprintf(os.Stderr, "unknown sql key: %s\n", key)
+		os.Exit(1)
+	}
+	if err := saveDocument(cfg, doc, path); err != nil {
+		exitParseErr(err)
+	}
+	printMutationOK(cfg, path, key, nil)
 }
 
 func runSQLSet(cfg *config, key, value string) {
@@ -479,11 +518,7 @@ func runSQLSet(cfg *config, key, value string) {
 	if err := saveDocument(cfg, doc, path); err != nil {
 		exitParseErr(err)
 	}
-	if cfg.jsonOut {
-		_ = writeJSON(map[string]any{"ok": true, "path": path, "key": key})
-		return
-	}
-	fmt.Println("ok")
+	printMutationOK(cfg, path, key, nil)
 }
 
 func runSQLGet(cfg *config, key, path, verb, dialect string) {
@@ -603,4 +638,19 @@ func newUnwrapCmd(cfg *config) *cobra.Command {
 	}
 	c.Flags().StringVarP(&out, "output", "o", "", "output plain path")
 	return c
+}
+
+func printMutationOK(cfg *config, path, key string, extra map[string]any) {
+	if cfg.jsonOut {
+		out := map[string]any{"ok": true, "path": path}
+		if key != "" {
+			out["key"] = key
+		}
+		for k, v := range extra {
+			out[k] = v
+		}
+		_ = writeJSON(out)
+		return
+	}
+	fmt.Println("ok")
 }

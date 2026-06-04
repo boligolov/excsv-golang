@@ -58,11 +58,19 @@ excsv [--flags] FILE
 ├── meta
 │   ├── list
 │   ├── get [KEY]
-│   └── set KEY --value VAL
+│   ├── set KEY --value VAL
+│   └── remove KEY
+├── agg
+│   ├── list
+│   ├── get [NAME]
+│   ├── add NAME
+│   ├── update NAME
+│   └── remove NAME
 └── sql
     ├── list [--verb] [--dialect]
     ├── get [KEY] [--verb] [--dialect]
-    └── set KEY --value VAL
+    ├── set KEY --value VAL
+    └── remove KEY
 
 excsv version
 ```
@@ -152,6 +160,35 @@ Same pattern as `header` (`key: value` text; JSON object on list).
 | **Writes** | upsert `#@KEY: VALUE` in place |
 | **Stdout** | `ok` or JSON `{"ok":true,"path":"…","key":"…"}` |
 
+### `excsv FILE meta remove KEY`
+
+| | |
+|---|---|
+| **Writes** | removes `#@KEY` |
+| **Exit 1** | unknown key |
+
+---
+
+## `agg` — `#%` aggregations
+
+Standard names: `count_nonnull`, `count_null`, `count_distinct`, `sum`, `avg`, `min`, `max`, `len_min`, `len_max` (per [ExCSV spec](https://github.com/boligolov/excsv) §6). Values are computed from the data section when possible (`sum`/`avg`/`min`/`max` on `decimal`/`float`/`double` columns; `len_*` on `string`/`text`; counts on all columns). Nulls use `null=` from the header.
+
+### `excsv FILE agg list` / `get [NAME]`
+
+Text: `#%name: v1,v2,…` per column. JSON: `[{name, values}]`.
+
+### `excsv FILE agg add NAME`
+
+Computes and appends `#%NAME`. **If `NAME` already exists: no change** (exit `0`, JSON `"added":false`).
+
+### `excsv FILE agg update NAME`
+
+Recomputes and replaces `#%NAME` (creates if missing).
+
+### `excsv FILE agg remove NAME`
+
+**Exit 1** if unknown.
+
 ---
 
 ## `rows`
@@ -180,6 +217,10 @@ SQL payload; list if `KEY` omitted. **Exit 1** if unknown/ambiguous.
 | **VALUE** | single-line SQL (shell-quoted) |
 | **Writes** | update or append `#$KEY: VALUE` |
 
+### `excsv FILE sql remove KEY`
+
+**Exit 1** if unknown key.
+
 ---
 
 ## `version`
@@ -206,7 +247,7 @@ No `FILE`. Prints `excsv-cli <version> (built <time>)`.
 | Class | Commands | ZIP |
 |-------|----------|-----|
 | **Metadata read** | `info`, `header`, `meta`, `sql`, `rows` | comment only |
-| **Metadata write** | `meta set`, `sql set` | decompress → edit → re-wrap |
+| **Metadata write** | `meta set/remove`, `sql set/remove`, `agg add/update/remove` | decompress → edit → re-wrap |
 | **Data read** | `validate`, `strip`, `cat` | decompress inner |
 
 ---
@@ -242,10 +283,18 @@ excsv FILE header get [KEY]
 excsv FILE meta list
 excsv FILE meta get [KEY]
 excsv FILE meta set KEY --value "VALUE"
+excsv FILE meta remove KEY
+
+excsv FILE agg list
+excsv FILE agg get [NAME]
+excsv FILE agg add NAME
+excsv FILE agg update NAME
+excsv FILE agg remove NAME
 
 excsv FILE rows
 
 excsv FILE sql list [--verb ddl|dql] [--dialect DIALECT]
 excsv FILE sql get [KEY] [--verb] [--dialect]
 excsv FILE sql set KEY --value "SQL PAYLOAD"
+excsv FILE sql remove KEY
 ```

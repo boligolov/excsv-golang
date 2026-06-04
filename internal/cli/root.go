@@ -62,6 +62,7 @@ func newRoot() *cobra.Command {
 		newHeaderCmd(cfg),
 		newMetaCmd(cfg),
 		newSQLCmd(cfg),
+		newAggCmd(cfg),
 	)
 	return root
 }
