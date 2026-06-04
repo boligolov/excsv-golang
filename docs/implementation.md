@@ -1,6 +1,6 @@
 # Go CLI Implementation Plan — ExCSV (plain + zip)
 
-Implementation guide for **excsv-cli** in this repository. Normative behaviour comes from [`docs/downloaded/README-LLM.md`](downloaded/README-LLM.md). Feature scope comes from [`docs/downloaded/plan-01-features.md`](downloaded/plan-01-features.md). Tests are driven by [`test/fixtures/fixtures.yaml`](../test/fixtures/fixtures.yaml).
+Implementation guide for **excsv-cli** in this repository. Normative behaviour comes from [`docs/downloaded/README-LLM.md`](downloaded/README-LLM.md) and topic files under [`docs/downloaded/llm/`](downloaded/llm/). Feature scope comes from [`docs/downloaded/plan-01-features.md`](downloaded/plan-01-features.md). Tests are driven by [`test/fixtures/fixtures.yaml`](../test/fixtures/fixtures.yaml).
 
 **In scope:** row family (RF) — **plain** (`.excsv`, `.ecsv`) and **zip** (`.excsv.zip`, `.ecsv.zip`).
 
@@ -441,7 +441,7 @@ Unchanged — see prior plan. Pack format, `#table`/`#fk`, SQL execution, encryp
 
 | Document | Role |
 | --- | --- |
-| [`README-LLM.md`](downloaded/README-LLM.md) | Normative format |
+| [`README-LLM.md`](downloaded/README-LLM.md) + [`llm/`](downloaded/llm/) | Normative format (hub + topics) |
 | [`plan-README.md`](downloaded/plan-README.md) | Wave gating, spec-first rule |
 | [`plan-01-features.md`](downloaded/plan-01-features.md) | Feature IDs A–P |
 | [`plan-02-fixtures.md`](downloaded/plan-02-fixtures.md) | Fixture layout, manifest schema |

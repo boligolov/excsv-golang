@@ -14,6 +14,30 @@ cd "$ROOT"
 UPSTREAM_BASE="https://raw.githubusercontent.com/boligolov/excsv/master"
 FIXTURE_BASE="${UPSTREAM_BASE}/fixtures"
 
+# Normative LLM spec: root hub + per-topic files under docs/llm/ (upstream split).
+LLM_TOPIC_FILES=(
+  README.md
+  aggregations.md
+  canonical-example.md
+  checksum.md
+  columns.md
+  csvw.md
+  data-section.md
+  error-handling.md
+  file-metadata.md
+  file-structure.md
+  header.md
+  identity.md
+  license.md
+  meta-lines.md
+  parsing.md
+  quick-reference.md
+  reserved.md
+  serialization.md
+  sql.md
+  zip.md
+)
+
 SPECS_ONLY=0
 FIXTURES_ONLY=0
 for arg in "$@"; do
@@ -37,12 +61,15 @@ download() {
 
 if [[ "$FIXTURES_ONLY" -eq 0 ]]; then
   echo "Downloading spec/plan snapshots..."
-  mkdir -p docs/downloaded test/fixtures
+  mkdir -p docs/downloaded/llm test/fixtures
   download "${UPSTREAM_BASE}/README-LLM.md" docs/downloaded/README-LLM.md
   download "${UPSTREAM_BASE}/plan/README.md" docs/downloaded/plan-README.md
   download "${UPSTREAM_BASE}/plan/01-features.md" docs/downloaded/plan-01-features.md
   download "${UPSTREAM_BASE}/plan/02-fixtures.md" docs/downloaded/plan-02-fixtures.md
   download "${FIXTURE_BASE}/fixtures.yaml" test/fixtures/fixtures.yaml
+  for name in "${LLM_TOPIC_FILES[@]}"; do
+    download "${UPSTREAM_BASE}/docs/llm/${name}" "docs/downloaded/llm/${name}"
+  done
 fi
 
 if [[ "$SPECS_ONLY" -eq 0 ]]; then

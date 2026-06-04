@@ -71,7 +71,7 @@ Partial sync:
 
 | Command | Gets |
 | --- | --- |
-| `.\makefile.ps1 sync-specs` | `docs/downloaded/*.md` + `test/fixtures/fixtures.yaml` |
+| `.\makefile.ps1 sync-specs` | `docs/downloaded/README-LLM.md`, `docs/downloaded/llm/*.md`, plan snapshots + `test/fixtures/fixtures.yaml` |
 | `.\makefile.ps1 sync-fixtures` | Fixture bytes only (needs `fixtures.yaml` already) |
 | `.\scripts\sync-upstream.ps1 -SpecsOnly` | Same as sync-specs |
 | `.\scripts\sync-upstream.ps1 -FixturesOnly` | Same as sync-fixtures |
@@ -228,7 +228,7 @@ internal/fixtures/   Manifest loader (shared by library + CLI tests)
 pkg/excsv/           Core parser and serializer
 pkg/excsv/zip/       Row ZIP container
 test/fixtures/       Fixture corpus (gitignored; sync from upstream)
-docs/downloaded/     Spec snapshots (gitignored; sync from upstream)
+docs/downloaded/     Spec hub + docs/downloaded/llm/ topics (gitignored; sync from upstream)
 ```
 
 ## Status

@@ -6,7 +6,8 @@ Reference index for building **excsv-cli** (Go). Use the upstream [boligolov/exc
 
 | Resource | URL | Local copy |
 | --- | --- | --- |
-| ExCSV specification (LLM reference) | https://github.com/boligolov/excsv/blob/master/README-LLM.md | [`docs/downloaded/README-LLM.md`](downloaded/README-LLM.md) |
+| ExCSV specification (LLM hub) | https://github.com/boligolov/excsv/blob/master/README-LLM.md | [`docs/downloaded/README-LLM.md`](downloaded/README-LLM.md) |
+| LLM spec topics | https://github.com/boligolov/excsv/tree/master/docs/llm | [`docs/downloaded/llm/`](downloaded/llm/) |
 | Implementation plan (overview) | https://github.com/boligolov/excsv/blob/master/plan/README.md | [`docs/downloaded/plan-README.md`](downloaded/plan-README.md) |
 | Feature catalog (step 1) | https://github.com/boligolov/excsv/blob/master/plan/01-features.md | [`docs/downloaded/plan-01-features.md`](downloaded/plan-01-features.md) |
 | Test fixtures spec (step 2) | https://github.com/boligolov/excsv/blob/master/plan/02-fixtures.md | [`docs/downloaded/plan-02-fixtures.md`](downloaded/plan-02-fixtures.md) |
@@ -16,6 +17,7 @@ Raw download URLs (for refresh scripts):
 
 ```
 https://raw.githubusercontent.com/boligolov/excsv/master/README-LLM.md
+https://raw.githubusercontent.com/boligolov/excsv/master/docs/llm/<topic>.md   # see scripts/sync-upstream.*
 https://raw.githubusercontent.com/boligolov/excsv/master/plan/README.md
 https://raw.githubusercontent.com/boligolov/excsv/master/plan/01-features.md
 https://raw.githubusercontent.com/boligolov/excsv/master/plan/02-fixtures.md
@@ -24,13 +26,13 @@ https://raw.githubusercontent.com/boligolov/excsv/master/fixtures/fixtures.yaml
 
 ## What each source means
 
-### `README-LLM.md` — normative spec
+### `README-LLM.md` + `docs/llm/*.md` — normative spec
 
 **Authority:** highest. If behaviour is not defined here, do not invent it — update the spec upstream first.
 
-Covers ExCSV v0.2 (Draft): file layout (header → `#` meta → data), header line (`#!excsv`), delimiters/quoting, meta keys (`#%`, `#@`, `#$`, etc.), CSVW embedding, checksums, ZIP container (`.excsv.zip`), encoding, SQL meta keys. This is what parsers, serializers, and the CLI must implement.
+Upstream split the monolithic LLM reference into a **hub** ([`README-LLM.md`](downloaded/README-LLM.md)) and **per-topic files** under [`docs/downloaded/llm/`](downloaded/llm/) (mirrors upstream `docs/llm/`). Topics include file structure, header, meta lines, aggregations, SQL, parsing/serialization algorithms, ZIP, error handling, etc.
 
-**Use when:** implementing parse/serialize logic, error kinds, canonical output, strict vs lenient mode, container handling.
+**Use when:** implementing parse/serialize logic, error kinds, canonical output, strict vs lenient mode, container handling. Start from the hub index, then open the relevant `llm/*.md` topic.
 
 ### `plan/README.md` — implementation strategy
 
@@ -70,7 +72,8 @@ Lists fixture IDs, which features they exercise, and expected parse result (ok /
 docs/
 ├── sources_and_specifications.md   ← this file
 └── downloaded/                     ← spec + plan snapshots (gitignored; refresh from upstream)
-    ├── README-LLM.md
+    ├── README-LLM.md               ← hub / topic index
+    ├── llm/                         ← normative topics (aggregations.md, parsing.md, …)
     ├── plan-README.md
     ├── plan-01-features.md
     └── plan-02-fixtures.md
@@ -90,7 +93,7 @@ Refresh when upstream `boligolov/excsv` changes in ways that affect implementati
 
 | Asset | Refresh trigger | Action |
 | --- | --- | --- |
-| **`README-LLM.md`** | Spec version bump, new meta keys, ZIP/pack rules, error semantics | Re-download to `docs/downloaded/`; re-read changed sections; update parser/CLI; extend error kinds |
+| **`README-LLM.md` + `docs/llm/*.md`** | Spec version bump, new meta keys, ZIP/pack rules, error semantics | Re-run sync (hub + `docs/downloaded/llm/`); re-read changed topics; update parser/CLI; extend error kinds |
 | **`plan/01-features.md`** | New features, changed RF/PF matrix, wave scope | Re-download; reconcile CLI command tree and backlog |
 | **`plan/02-fixtures.md`** | New fixture categories, naming/manifest schema changes | Re-download; adjust test harness |
 | **`fixtures/fixtures.yaml`** | New fixture IDs, changed `expect` blocks, new `error_kinds` | Re-download to `test/fixtures/`; sync `.excsv` files from upstream `fixtures/` if manifest references new entries |
@@ -124,7 +127,7 @@ Refresh when upstream `boligolov/excsv` changes in ways that affect implementati
 # or: make sync-upstream
 ```
 
-This downloads all five spec/plan snapshots plus `fixtures.yaml`, then walks the manifest and fetches every `id:` path and `data_sibling:` path under `test/fixtures/`.
+This downloads the LLM hub, all `docs/llm/*.md` topic files, three plan snapshots, `fixtures.yaml`, then walks the manifest and fetches every `id:` path and `data_sibling:` path under `test/fixtures/`.
 
 Partial sync:
 
@@ -157,13 +160,8 @@ Pack fixtures (`pack/…`) are skipped until wave 3; the Go runner only exercise
 
 ```powershell
 New-Item -ItemType Directory -Force -Path docs/downloaded, test/fixtures | Out-Null
-@(
-  @{ url = "https://raw.githubusercontent.com/boligolov/excsv/master/README-LLM.md"; out = "docs/downloaded/README-LLM.md" },
-  @{ url = "https://raw.githubusercontent.com/boligolov/excsv/master/plan/README.md"; out = "docs/downloaded/plan-README.md" },
-  @{ url = "https://raw.githubusercontent.com/boligolov/excsv/master/plan/01-features.md"; out = "docs/downloaded/plan-01-features.md" },
-  @{ url = "https://raw.githubusercontent.com/boligolov/excsv/master/plan/02-fixtures.md"; out = "docs/downloaded/plan-02-fixtures.md" },
-  @{ url = "https://raw.githubusercontent.com/boligolov/excsv/master/fixtures/fixtures.yaml"; out = "test/fixtures/fixtures.yaml" }
-) | ForEach-Object { Invoke-WebRequest -Uri $_.url -OutFile $_.out -UseBasicParsing }
+.\scripts\sync-upstream.ps1 -SpecsOnly
+# or download hub + plan + docs/llm/*.md manually — see scripts/sync-upstream.ps1 for the topic list
 ```
 
 **Full fixture tree (clone):** CI uses a shallow clone of [boligolov/excsv](https://github.com/boligolov/excsv) and copies `fixtures/plain` and `fixtures/zip` — see [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). Equivalent locally:

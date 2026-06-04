@@ -19,6 +19,30 @@ Set-Location -LiteralPath $RepoRoot
 $UpstreamBase = 'https://raw.githubusercontent.com/boligolov/excsv/master'
 $FixtureBase = "$UpstreamBase/fixtures"
 
+# Normative LLM spec: root hub + per-topic files under docs/llm/ (upstream split).
+$LlmTopicFiles = @(
+    'README.md',
+    'aggregations.md',
+    'canonical-example.md',
+    'checksum.md',
+    'columns.md',
+    'csvw.md',
+    'data-section.md',
+    'error-handling.md',
+    'file-metadata.md',
+    'file-structure.md',
+    'header.md',
+    'identity.md',
+    'license.md',
+    'meta-lines.md',
+    'parsing.md',
+    'quick-reference.md',
+    'reserved.md',
+    'serialization.md',
+    'sql.md',
+    'zip.md'
+)
+
 $SpecDownloads = @(
     @{ url = "$UpstreamBase/README-LLM.md"; out = 'docs/downloaded/README-LLM.md' },
     @{ url = "$UpstreamBase/plan/README.md"; out = 'docs/downloaded/plan-README.md' },
@@ -26,6 +50,9 @@ $SpecDownloads = @(
     @{ url = "$UpstreamBase/plan/02-fixtures.md"; out = 'docs/downloaded/plan-02-fixtures.md' },
     @{ url = "$FixtureBase/fixtures.yaml"; out = 'test/fixtures/fixtures.yaml' }
 )
+foreach ($name in $LlmTopicFiles) {
+    $SpecDownloads += @{ url = "$UpstreamBase/docs/llm/$name"; out = "docs/downloaded/llm/$name" }
+}
 
 function Get-ManifestPaths {
     param([string]$ManifestPath)
@@ -56,7 +83,7 @@ $syncFixtures = -not $SpecsOnly
 
 if ($syncSpecs) {
     Write-Host 'Downloading spec/plan snapshots...'
-    New-Item -ItemType Directory -Force -Path docs/downloaded, test/fixtures | Out-Null
+    New-Item -ItemType Directory -Force -Path docs/downloaded, docs/downloaded/llm, test/fixtures | Out-Null
     foreach ($item in $SpecDownloads) {
         Save-RemoteFile -Url $item.url -OutPath $item.out
     }
