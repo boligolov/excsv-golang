@@ -57,24 +57,54 @@ func parseResolvedPath(path string, data []byte, opts ParseOptions) (*ParseResul
 }
 
 func parseZipPath(path string, data []byte, opts ParseOptions) (*ParseResult, error) {
-	ext, err := excsvzip.Extract(path, data)
+	ins, err := excsvzip.Inspect(path, data)
 	if err != nil {
 		return nil, mapZipError(err)
 	}
+	if opts.ZipLoadData {
+		return parseZipInner(path, data, ins, opts)
+	}
+	return parseZipComment(path, ins, opts)
+}
+
+func parseZipComment(path string, ins *excsvzip.InspectResult, opts ParseOptions) (*ParseResult, error) {
+	if ins.Comment == "" {
+		return nil, fail(ErrZipCommentNotExcsvPrefix, 0, "zip archive has no #!excsv comment for metadata-only read")
+	}
 	opts.ExpectZipInner = true
-	opts.ZipUncompressedSize = ext.UncompressedSize
-	res, err := ParseBytes(ext.Inner, opts)
+	opts.ZipUncompressedSize = ins.UncompressedSize
+	res, err := ParseBytes([]byte(ins.Comment), opts)
 	if err != nil {
 		return nil, err
 	}
-	if res.Doc != nil {
-		res.Doc.Form = FormZipInner
-		res.Doc.Source.Path = path
-		res.Doc.Source.ZipPath = path
-		res.Doc.Source.Comment = ext.Comment
-		res.Doc.Source.PrimaryName = ext.PrimaryName
-	}
+	applyZipSource(res.Doc, path, ins)
 	return res, nil
+}
+
+func parseZipInner(path string, data []byte, ins *excsvzip.InspectResult, opts ParseOptions) (*ParseResult, error) {
+	inner, err := excsvzip.ExtractPrimary(data, ins)
+	if err != nil {
+		return nil, err
+	}
+	opts.ExpectZipInner = true
+	opts.ZipUncompressedSize = ins.UncompressedSize
+	res, err := ParseBytes(inner, opts)
+	if err != nil {
+		return nil, err
+	}
+	applyZipSource(res.Doc, path, ins)
+	return res, nil
+}
+
+func applyZipSource(doc *Document, path string, ins *excsvzip.InspectResult) {
+	if doc == nil || ins == nil {
+		return
+	}
+	doc.Form = FormZipInner
+	doc.Source.Path = path
+	doc.Source.ZipPath = path
+	doc.Source.Comment = ins.Comment
+	doc.Source.PrimaryName = ins.PrimaryName
 }
 
 func MapZipError(err error) error {

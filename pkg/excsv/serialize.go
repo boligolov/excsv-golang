@@ -100,6 +100,17 @@ func (doc *Document) RowCount() int {
 	return len(doc.Data.Rows)
 }
 
+// DeclaredOrCountedRows returns body row count from data when present, else rows= from header (e.g. ZIP comment metadata).
+func (doc *Document) DeclaredOrCountedRows() int {
+	if doc.Data.HasHeaderRow || len(doc.Data.Rows) > 0 {
+		return doc.RowCount()
+	}
+	if doc.Header.Rows != nil {
+		return *doc.Header.Rows
+	}
+	return 0
+}
+
 func (doc *Document) MetaMap() map[string]string {
 	m := make(map[string]string, len(doc.Meta.FileMeta))
 	for _, kv := range doc.Meta.FileMeta {

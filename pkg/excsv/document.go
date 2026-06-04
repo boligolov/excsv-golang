@@ -104,17 +104,18 @@ type ParseOptions struct {
 	ClearHumanComments  bool
 	ExpectZipInner      bool
 	ZipUncompressedSize int64
+	ZipLoadData         bool // decompress inner .excsv; false = metadata from ZIP comment only
 	SourcePath          string
 	ExpectProfile       string // stub, sidecar, sidecar_strict (fixture / explicit validation)
 	ResolveReference    bool   // load referenced data when reference= is set (default true)
 }
 
 func StrictOptions() ParseOptions {
-	return ParseOptions{Strict: true, ResolveReference: true}
+	return ParseOptions{Strict: true, ResolveReference: true, ZipLoadData: true}
 }
 
 func LenientOptions() ParseOptions {
-	return ParseOptions{Strict: false, ResolveReference: true}
+	return ParseOptions{Strict: false, ResolveReference: true, ZipLoadData: true}
 }
 
 type ParseResult struct {

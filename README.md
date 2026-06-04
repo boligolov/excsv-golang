@@ -163,42 +163,47 @@ Use `.\bin\excsv.exe` locally, or `excsv` if on your `PATH`.
 
 ```powershell
 # Validate
-excsv validate data.excsv
-excsv validate archive.excsv.zip
+excsv data.excsv validate
+excsv archive.excsv.zip validate
 
 # Summary (sidecar: profile + reference= when applicable)
-excsv info data.excsv
-excsv info data.excsv --json
+excsv data.excsv info
+excsv data.excsv info --json
 
 # Print canonical inner document (unwraps zip; sidecar emits meta only)
-excsv cat archive.excsv.zip
+excsv archive.excsv.zip cat
 
-# Header and metadata
-excsv header list data.excsv
-excsv header get version data.excsv
-excsv meta list data.excsv
+# Header and metadata (header is read-only; no header set)
+excsv data.excsv header list
+excsv data.excsv header get version
+excsv data.excsv meta list
+excsv data.excsv meta set author --value "author@example.com"
 
 # SQL companions (#$ddl / #$dql)
-excsv sql list data.excsv
-excsv sql list data.excsv --verb ddl --dialect postgres
+excsv data.excsv sql list
+excsv data.excsv sql list --verb ddl --dialect postgres
+excsv data.excsv sql set ddl --value "CREATE TABLE t (id INT)"
 
 # Data
-excsv rows count data.excsv
-excsv clean data.excsv
-excsv convert data.csv -o data.excsv
-excsv convert data.tsv -o data.excsv --columns
-excsv convert data.csv --sidecar -o data.excsv          # metadata only; reference=data.csv
-excsv convert data.csv -o out.excsv --delim pipe --quote double   # re-encode inline data
+excsv data.excsv rows
+excsv data.excsv strip
+excsv data.csv convert -o data.excsv
+excsv data.tsv convert -o data.excsv --columns
+excsv data.csv convert --sidecar -o data.excsv
+excsv data.csv convert -o out.excsv --delim pipe --quote double
 
 # ZIP container
-excsv zip wrap data.excsv -o data.excsv.zip
-excsv zip unwrap data.excsv.zip -o data.excsv
-excsv zip peek data.excsv.zip
+excsv data.excsv wrap -o data.excsv.zip
+excsv data.excsv.zip unwrap -o data.excsv
 ```
 
-**Sidecar:** open `sales.excsv` (meta + `reference=sales.csv`) or `sales.csv` (auto-discovers `sales.excsv` / `.extsv` in the same directory). Data commands use the merged logical document.
+**Pattern:** `excsv [flags] FILE <command> …` — `FILE` is always first (after flags). `meta set` / `sql set` use `--value` (quoted string).
 
-**Flags:** `--strict` (default), `--lenient`, `--json`, `--clean-human-comments`. `--expect-profile` (`stub` | `sidecar` | `sidecar_strict`) is for fixture-style validation. All read commands require a FILE path (no stdin).
+**Sidecar:** `excsv sales.csv …` auto-discovers `sales.excsv` / `.extsv`; writes go to the sidecar.
+
+**Row ZIP:** `info` / `header` / `meta` / `sql` / `rows` read the archive comment; `validate` / `strip` / `cat` decompress the inner `.excsv`.
+
+**Flags:** `--strict` (default), `--lenient`, `--json`, `--clean-human-comments`, `--expect-profile` (`stub` | `sidecar` | `sidecar_strict`).
 
 ## Library
 

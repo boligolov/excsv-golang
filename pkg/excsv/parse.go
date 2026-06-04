@@ -268,7 +268,7 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 		return nil, err
 	}
 
-	if doc.Header.Rows != nil && len(doc.Data.Rows) != *doc.Header.Rows {
+	if hasInlineData && doc.Header.Rows != nil && len(doc.Data.Rows) != *doc.Header.Rows {
 		return nil, fail(ErrHeaderInvalidValue, 1, "rows= does not match data row count")
 	}
 

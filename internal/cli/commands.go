@@ -14,12 +14,11 @@ import (
 
 func newValidateCmd(cfg *config) *cobra.Command {
 	return &cobra.Command{
-		Use:   "validate FILE",
+		Use:   "validate",
 		Short: "Check ExCSV conformance",
-		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			path := args[0]
-			if _, err := loadDocOnly(cfg, path); err != nil {
+			path := targetPath()
+			if _, err := loadDocOnly(cfg, path, true); err != nil {
 				exitParseErr(err)
 			}
 			if cfg.jsonOut {
@@ -33,11 +32,11 @@ func newValidateCmd(cfg *config) *cobra.Command {
 
 func newInfoCmd(cfg *config) *cobra.Command {
 	return &cobra.Command{
-		Use:   "info FILE",
+		Use:   "info",
 		Short: "Compact summary",
-		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			res, err := loadDoc(cfg, args[0])
+			path := targetPath()
+			res, err := loadDoc(cfg, path, false)
 			if err != nil {
 				exitParseErr(err)
 			}
@@ -48,7 +47,7 @@ func newInfoCmd(cfg *config) *cobra.Command {
 			if cfg.jsonOut {
 				out := map[string]any{
 					"version": doc.Header.Version, "delim": doc.Header.DelimName,
-					"quote": doc.Header.QuoteName, "rows": doc.RowCount(),
+					"quote": doc.Header.QuoteName, "rows": doc.DeclaredOrCountedRows(),
 					"columns": len(doc.Meta.Columns), "form": formName(doc.Form),
 					"profile": string(doc.Source.Profile),
 				}
@@ -62,7 +61,7 @@ func newInfoCmd(cfg *config) *cobra.Command {
 				return
 			}
 			line := fmt.Sprintf("ExCSV %s  rows=%d  columns=%d  form=%s  profile=%s",
-				doc.Header.Version, doc.RowCount(), len(doc.Meta.Columns), formName(doc.Form), doc.Source.Profile)
+				doc.Header.Version, doc.DeclaredOrCountedRows(), len(doc.Meta.Columns), formName(doc.Form), doc.Source.Profile)
 			if doc.Source.Reference != "" {
 				line += fmt.Sprintf("  reference=%s", doc.Source.Reference)
 			}
@@ -73,11 +72,10 @@ func newInfoCmd(cfg *config) *cobra.Command {
 
 func newCatCmd(cfg *config) *cobra.Command {
 	return &cobra.Command{
-		Use:   "cat FILE",
+		Use:   "cat",
 		Short: "Print canonical inner ExCSV document",
-		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			doc, err := loadDocOnly(cfg, args[0])
+			doc, err := loadDocOnly(cfg, targetPath(), true)
 			if err != nil {
 				exitParseErr(err)
 			}
@@ -102,7 +100,7 @@ func newVersionCmd() *cobra.Command {
 }
 
 func runHeaderList(cfg *config, path string) {
-	doc, err := loadDocOnly(cfg, path)
+	doc, err := loadDocOnly(cfg, path, false)
 	if err != nil {
 		exitParseErr(err)
 	}
@@ -115,113 +113,140 @@ func runHeaderList(cfg *config, path string) {
 	}
 }
 
-func headerGetPath(args []string) (key, path string, listOnly bool) {
-	if len(args) == 0 {
-		exitUserErr("file required")
-		return "", "", false
+func runHeaderGet(cfg *config, key, path string) {
+	doc, err := loadDocOnly(cfg, path, false)
+	if err != nil {
+		exitParseErr(err)
 	}
-	if len(args) == 1 {
-		if headerArgLooksLikeFile(args[0]) {
-			return "", args[0], true
-		}
-		exitUserErr("file required")
-		return "", "", false
+	v, ok := doc.Header.Fields[key]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "unknown header key: %s\n", key)
+		os.Exit(1)
 	}
-	return args[0], args[1], false
-}
-
-func headerArgLooksLikeFile(arg string) bool {
-	ext := strings.ToLower(filepath.Ext(arg))
-	if ext == ".excsv" || ext == ".ecsv" || ext == ".extsv" || ext == ".csv" || ext == ".tsv" || strings.HasSuffix(strings.ToLower(arg), ".zip") {
-		return true
-	}
-	if _, err := os.Stat(arg); err == nil {
-		return true
-	}
-	return false
+	fmt.Println(v)
 }
 
 func newHeaderCmd(cfg *config) *cobra.Command {
 	cmd := &cobra.Command{Use: "header", Short: "Header line (#!excsv) operations"}
 	cmd.AddCommand(
 		&cobra.Command{
-			Use: "list FILE", Args: cobra.ExactArgs(1),
+			Use: "list", Short: "List header fields",
 			Run: func(cmd *cobra.Command, args []string) {
-				runHeaderList(cfg, args[0])
+				runHeaderList(cfg, targetPath())
 			},
 		},
 		&cobra.Command{
-			Use: "get [KEY] FILE", Args: cobra.RangeArgs(1, 2),
+			Use: "get [KEY]", Args: cobra.MaximumNArgs(1),
 			Run: func(cmd *cobra.Command, args []string) {
-				key, path, listOnly := headerGetPath(args)
-				if listOnly {
+				path := targetPath()
+				if len(args) == 0 {
 					runHeaderList(cfg, path)
 					return
 				}
-				doc, err := loadDocOnly(cfg, path)
-				if err != nil {
-					exitParseErr(err)
-				}
-				v, ok := doc.Header.Fields[key]
-				if !ok {
-					fmt.Fprintf(os.Stderr, "unknown header key: %s\n", key)
-					os.Exit(1)
-				}
-				fmt.Println(v)
+				runHeaderGet(cfg, args[0], path)
 			},
 		},
 	)
 	return cmd
 }
 
+func runMetaList(cfg *config, path string) {
+	doc, err := loadDocOnly(cfg, path, false)
+	if err != nil {
+		exitParseErr(err)
+	}
+	if cfg.jsonOut {
+		_ = writeJSON(doc.MetaMap())
+		return
+	}
+	for _, kv := range doc.Meta.FileMeta {
+		fmt.Printf("%s: %s\n", kv.Key, kv.Value)
+	}
+}
+
+func runMetaGet(cfg *config, key, path string) {
+	doc, err := loadDocOnly(cfg, path, false)
+	if err != nil {
+		exitParseErr(err)
+	}
+	v, ok := doc.MetaMap()[key]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "unknown meta key: %s\n", key)
+		os.Exit(1)
+	}
+	fmt.Println(v)
+}
+
 func newMetaCmd(cfg *config) *cobra.Command {
+	var value string
 	cmd := &cobra.Command{Use: "meta", Short: "File metadata (#@) operations"}
-	cmd.AddCommand(&cobra.Command{
-		Use: "list FILE", Args: cobra.ExactArgs(1),
+	set := &cobra.Command{
+		Use:   "set KEY",
+		Short: "Set #@KEY (requires --value)",
+		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			doc, err := loadDocOnly(cfg, args[0])
-			if err != nil {
-				exitParseErr(err)
+			if value == "" {
+				exitUserErr("--value is required")
 			}
-			if cfg.jsonOut {
-				_ = writeJSON(doc.MetaMap())
-				return
-			}
-			for _, kv := range doc.Meta.FileMeta {
-				fmt.Printf("%s: %s\n", kv.Key, kv.Value)
-			}
+			runMetaSet(cfg, args[0], value)
 		},
-	})
+	}
+	set.Flags().StringVar(&value, "value", "", "metadata value (use shell quotes for spaces)")
+	cmd.AddCommand(
+		&cobra.Command{
+			Use: "list", Run: func(cmd *cobra.Command, args []string) {
+				runMetaList(cfg, targetPath())
+			},
+		},
+		&cobra.Command{
+			Use: "get [KEY]", Args: cobra.MaximumNArgs(1),
+			Run: func(cmd *cobra.Command, args []string) {
+				path := targetPath()
+				if len(args) == 0 {
+					runMetaList(cfg, path)
+					return
+				}
+				runMetaGet(cfg, args[0], path)
+			},
+		},
+		set,
+	)
 	return cmd
+}
+
+func runMetaSet(cfg *config, key, value string) {
+	path := targetPath()
+	doc, err := loadDocForMutation(cfg, path)
+	if err != nil {
+		exitParseErr(err)
+	}
+	doc.SetFileMeta(key, value)
+	if err := saveDocument(cfg, doc, path); err != nil {
+		exitParseErr(err)
+	}
+	if cfg.jsonOut {
+		_ = writeJSON(map[string]any{"ok": true, "path": path, "key": key})
+		return
+	}
+	fmt.Println("ok")
 }
 
 func newRowsCmd(cfg *config) *cobra.Command {
-	cmd := &cobra.Command{Use: "rows", Short: "Data row operations"}
-	cmd.AddCommand(&cobra.Command{
-		Use: "count FILE", Args: cobra.ExactArgs(1),
+	return &cobra.Command{
+		Use:   "rows",
+		Short: "Print rows= from header (alias for header get rows)",
 		Run: func(cmd *cobra.Command, args []string) {
-			doc, err := loadDocOnly(cfg, args[0])
-			if err != nil {
-				exitParseErr(err)
-			}
-			n := doc.RowCount()
-			if cfg.jsonOut {
-				_ = writeJSON(map[string]int{"rows": n})
-				return
-			}
-			fmt.Println(n)
+			runHeaderGet(cfg, "rows", targetPath())
 		},
-	})
-	return cmd
+	}
 }
 
-func newCleanCmd(cfg *config) *cobra.Command {
+func newStripCmd(cfg *config) *cobra.Command {
 	return &cobra.Command{
-		Use:   "clean FILE",
-		Short: "Strip ExCSV metadata and print plain CSV/TSV data",
-		Args:  cobra.ExactArgs(1),
+		Use:   "strip",
+		Short: "Remove ExCSV metadata and print plain CSV/TSV data",
 		Run: func(cmd *cobra.Command, args []string) {
-			path := args[0]
+			path := targetPath()
 			if isSidecarInputPath(path) {
 				opts := cfg.parseOpts()
 				opts.ResolveReference = false
@@ -230,11 +255,11 @@ func newCleanCmd(cfg *config) *cobra.Command {
 					exitParseErr(err)
 				}
 				if excsv.IsSidecarMetaOnly(res.Doc) {
-					printSidecarCleanNotice(res.Doc, path)
+					printSidecarStripNotice(res.Doc, path)
 					return
 				}
 			}
-			doc, err := loadDocOnly(cfg, path)
+			doc, err := loadDocOnly(cfg, path, true)
 			if err != nil {
 				exitParseErr(err)
 			}
@@ -254,7 +279,7 @@ func isSidecarInputPath(path string) bool {
 	return ext == ".excsv" || ext == ".ecsv" || ext == ".extsv"
 }
 
-func printSidecarCleanNotice(doc *excsv.Document, _ string) {
+func printSidecarStripNotice(doc *excsv.Document, _ string) {
 	ref := doc.Header.Fields["reference"]
 	if ref == "" {
 		ref = doc.Source.Reference
@@ -263,7 +288,7 @@ func printSidecarCleanNotice(doc *excsv.Document, _ string) {
 	if ref != "" {
 		msg += "; data is in " + ref
 	}
-	msg += "). clean does nothing useful here. If you don't need it, delete it."
+	msg += "). strip does nothing useful here. If you don't need it, delete it."
 	fmt.Fprintln(os.Stderr, msg)
 }
 
@@ -273,11 +298,10 @@ func newConvertCmd(cfg *config) *cobra.Command {
 	var meta []string
 
 	c := &cobra.Command{
-		Use:   "convert FILE",
+		Use:   "convert",
 		Short: "Create ExCSV from CSV/TSV (inline or sidecar)",
-		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			path := args[0]
+			path := targetPath()
 			data, err := os.ReadFile(path)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -376,44 +400,120 @@ func writeOutputBytes(path string, data []byte) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
+func runSQLList(cfg *config, path, verb, dialect string) {
+	doc, err := loadDocOnly(cfg, path, false)
+	if err != nil {
+		exitParseErr(err)
+	}
+	var out []map[string]string
+	for _, s := range doc.Meta.SQL {
+		if verb != "" && s.Verb != verb {
+			continue
+		}
+		eff := excsv.EffectiveDialect(s, doc.Header.SQLDialect)
+		if dialect != "" && !dialectMatches(eff, dialect) {
+			continue
+		}
+		entry := map[string]string{
+			"verb": s.Verb, "dialect": eff, "key": s.RawKey, "sql": s.Payload,
+		}
+		out = append(out, entry)
+		if !cfg.jsonOut {
+			fmt.Printf("#$%s [%s]: %s\n", s.RawKey, eff, s.Payload)
+		}
+	}
+	if cfg.jsonOut {
+		_ = writeJSON(out)
+	}
+}
+
 func newSQLCmd(cfg *config) *cobra.Command {
-	var verb, dialect string
+	var verb, dialect, value string
 	cmd := &cobra.Command{Use: "sql", Short: "SQL companion (#$) operations"}
 	list := &cobra.Command{
-		Use:   "list FILE",
-		Short: "List #$ddl / #$dql statements",
-		Args:  cobra.ExactArgs(1),
+		Use: "list",
 		Run: func(cmd *cobra.Command, args []string) {
-			doc, err := loadDocOnly(cfg, args[0])
-			if err != nil {
-				exitParseErr(err)
-			}
-			var out []map[string]string
-			for _, s := range doc.Meta.SQL {
-				if verb != "" && s.Verb != verb {
-					continue
-				}
-				eff := excsv.EffectiveDialect(s, doc.Header.SQLDialect)
-				if dialect != "" && !dialectMatches(eff, dialect) {
-					continue
-				}
-				entry := map[string]string{
-					"verb": s.Verb, "dialect": eff, "key": s.RawKey, "sql": s.Payload,
-				}
-				out = append(out, entry)
-				if !cfg.jsonOut {
-					fmt.Printf("#$%s [%s]: %s\n", s.RawKey, eff, s.Payload)
-				}
-			}
-			if cfg.jsonOut {
-				_ = writeJSON(out)
-			}
+			runSQLList(cfg, targetPath(), verb, dialect)
 		},
 	}
 	list.Flags().StringVar(&verb, "verb", "", "filter: ddl or dql")
 	list.Flags().StringVar(&dialect, "dialect", "", "filter by effective dialect (exact or family)")
-	cmd.AddCommand(list)
+	get := &cobra.Command{
+		Use: "get [KEY]", Args: cobra.MaximumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			path := targetPath()
+			if len(args) == 0 {
+				runSQLList(cfg, path, verb, dialect)
+				return
+			}
+			runSQLGet(cfg, args[0], path, verb, dialect)
+		},
+	}
+	get.Flags().StringVar(&verb, "verb", "", "filter: ddl or dql")
+	get.Flags().StringVar(&dialect, "dialect", "", "filter by effective dialect (exact or family)")
+	set := &cobra.Command{
+		Use:   "set KEY",
+		Short: "Set #$KEY payload (requires --value)",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			if value == "" {
+				exitUserErr("--value is required")
+			}
+			runSQLSet(cfg, args[0], value)
+		},
+	}
+	set.Flags().StringVar(&value, "value", "", "SQL payload (use shell quotes for spaces)")
+	cmd.AddCommand(list, get, set)
 	return cmd
+}
+
+func runSQLSet(cfg *config, key, value string) {
+	path := targetPath()
+	doc, err := loadDocForMutation(cfg, path)
+	if err != nil {
+		exitParseErr(err)
+	}
+	if err := doc.SetSQL(key, value); err != nil {
+		exitParseErr(err)
+	}
+	if err := saveDocument(cfg, doc, path); err != nil {
+		exitParseErr(err)
+	}
+	if cfg.jsonOut {
+		_ = writeJSON(map[string]any{"ok": true, "path": path, "key": key})
+		return
+	}
+	fmt.Println("ok")
+}
+
+func runSQLGet(cfg *config, key, path, verb, dialect string) {
+	doc, err := loadDocOnly(cfg, path, false)
+	if err != nil {
+		exitParseErr(err)
+	}
+	var matches []excsv.SQLStatement
+	for _, s := range doc.Meta.SQL {
+		if s.RawKey != key {
+			continue
+		}
+		if verb != "" && s.Verb != verb {
+			continue
+		}
+		eff := excsv.EffectiveDialect(s, doc.Header.SQLDialect)
+		if dialect != "" && !dialectMatches(eff, dialect) {
+			continue
+		}
+		matches = append(matches, s)
+	}
+	if len(matches) == 0 {
+		fmt.Fprintf(os.Stderr, "unknown sql key: %s\n", key)
+		os.Exit(1)
+	}
+	if len(matches) > 1 {
+		fmt.Fprintf(os.Stderr, "ambiguous sql key: %s\n", key)
+		os.Exit(1)
+	}
+	fmt.Println(matches[0].Payload)
 }
 
 func defaultSidecarPath(input string) string {
@@ -434,18 +534,22 @@ func dialectMatches(effective, target string) bool {
 	return eBase != "" && eBase == tBase
 }
 
-func newZipCmd(cfg *config) *cobra.Command {
-	cmd := &cobra.Command{Use: "zip", Short: "Row ZIP container operations"}
+func newWrapCmd(cfg *config) *cobra.Command {
 	var out string
-	wrap := &cobra.Command{
-		Use: "wrap INPUT", Args: cobra.ExactArgs(1),
+	c := &cobra.Command{
+		Use:   "wrap",
+		Short: "Wrap plain ExCSV as row ZIP",
 		Run: func(cmd *cobra.Command, args []string) {
-			data, err := os.ReadFile(args[0])
+			path := targetPath()
+			if isRowZipPath(path) {
+				exitUserErr("wrap requires a plain .excsv or .ecsv file, not a zip")
+			}
+			data, err := os.ReadFile(path)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
 				os.Exit(3)
 			}
-			base := filepath.Base(args[0])
+			base := filepath.Base(path)
 			entry := strings.TrimSuffix(base, filepath.Ext(base))
 			if !strings.HasSuffix(entry, ".excsv") && !strings.HasSuffix(entry, ".ecsv") {
 				entry += ".excsv"
@@ -464,22 +568,32 @@ func newZipCmd(cfg *config) *cobra.Command {
 			}
 		},
 	}
-	wrap.Flags().StringVarP(&out, "output", "o", "", "output zip path")
-	unwrap := &cobra.Command{
-		Use: "unwrap INPUT.zip", Args: cobra.ExactArgs(1),
+	c.Flags().StringVarP(&out, "output", "o", "", "output zip path")
+	return c
+}
+
+func newUnwrapCmd(cfg *config) *cobra.Command {
+	var out string
+	c := &cobra.Command{
+		Use:   "unwrap",
+		Short: "Extract inner plain ExCSV from row ZIP",
 		Run: func(cmd *cobra.Command, args []string) {
-			data, err := os.ReadFile(args[0])
+			path := targetPath()
+			if !isRowZipPath(path) {
+				exitUserErr("unwrap requires a .excsv.zip or .ecsv.zip file")
+			}
+			data, err := os.ReadFile(path)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
 				os.Exit(3)
 			}
-			ext, err := excsvzip.Extract(args[0], data)
+			ext, err := excsvzip.Extract(path, data)
 			if err != nil {
 				exitParseErr(excsv.MapZipError(err))
 			}
 			dest := out
 			if dest == "" {
-				dest = strings.TrimSuffix(filepath.Base(args[0]), ".zip")
+				dest = strings.TrimSuffix(filepath.Base(path), ".zip")
 			}
 			if err := os.WriteFile(dest, ext.Inner, 0o644); err != nil {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -487,26 +601,6 @@ func newZipCmd(cfg *config) *cobra.Command {
 			}
 		},
 	}
-	unwrap.Flags().StringVarP(&out, "output", "o", "", "output plain path")
-	peek := &cobra.Command{
-		Use: "peek INPUT.zip", Args: cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			data, err := os.ReadFile(args[0])
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%v\n", err)
-				os.Exit(3)
-			}
-			ext, err := excsvzip.Extract(args[0], data)
-			if err != nil {
-				exitParseErr(excsv.MapZipError(err))
-			}
-			if cfg.jsonOut {
-				_ = writeJSON(map[string]string{"comment": ext.Comment})
-				return
-			}
-			fmt.Println(ext.Comment)
-		},
-	}
-	cmd.AddCommand(wrap, unwrap, peek)
-	return cmd
+	c.Flags().StringVarP(&out, "output", "o", "", "output plain path")
+	return c
 }

@@ -27,11 +27,17 @@ func (c config) parseOpts() excsv.ParseOptions {
 	return opts
 }
 
-func NewRoot() *cobra.Command {
+func newRoot() *cobra.Command {
 	cfg := &config{}
 	root := &cobra.Command{
-		Use:          "excsv",
-		Short:        "CLI for ExCSV v0.2 (plain and zip)",
+		Use:   "excsv [flags] FILE <command>",
+		Short: "CLI for ExCSV v0.2 (plain and zip)",
+		Long: `Operate on an ExCSV document: put FILE first, then a command.
+
+  excsv data.excsv validate
+  excsv data.excsv meta set author --value "a@b"
+  excsv data.csv convert -o data.excsv
+  excsv version`,
 		SilenceUsage: true,
 	}
 	root.PersistentFlags().BoolVar(&cfg.strict, "strict", true, "fail on spec violations")
@@ -39,27 +45,40 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().BoolVar(&cfg.jsonOut, "json", false, "machine-readable output")
 	root.PersistentFlags().BoolVar(&cfg.cleanHumanComments, "clean-human-comments", false, "drop ## comments on read/rewrite")
 	root.PersistentFlags().StringVar(&cfg.expectProfile, "expect-profile", "", "validate as stub, sidecar, or sidecar_strict (fixture/testing)")
+	root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		requireTargetFile(cmd)
+	}
 
-	root.AddCommand(newValidateCmd(cfg))
-	root.AddCommand(newInfoCmd(cfg))
-	root.AddCommand(newCatCmd(cfg))
-	root.AddCommand(newHeaderCmd(cfg))
-	root.AddCommand(newMetaCmd(cfg))
-	root.AddCommand(newRowsCmd(cfg))
-	root.AddCommand(newCleanCmd(cfg))
-	root.AddCommand(newConvertCmd(cfg))
-	root.AddCommand(newSQLCmd(cfg))
-	root.AddCommand(newZipCmd(cfg))
 	root.AddCommand(newVersionCmd())
+	root.AddCommand(
+		newValidateCmd(cfg),
+		newInfoCmd(cfg),
+		newCatCmd(cfg),
+		newStripCmd(cfg),
+		newConvertCmd(cfg),
+		newWrapCmd(cfg),
+		newUnwrapCmd(cfg),
+		newRowsCmd(cfg),
+		newHeaderCmd(cfg),
+		newMetaCmd(cfg),
+		newSQLCmd(cfg),
+	)
 	return root
 }
 
-func loadDoc(cfg *config, path string) (*excsv.ParseResult, error) {
-	return excsv.ParseFile(path, cfg.parseOpts())
+// NewRoot returns the root command (for tests); prefer Execute() for file-first argv handling.
+func NewRoot() *cobra.Command {
+	return newRoot()
 }
 
-func loadDocOnly(cfg *config, path string) (*excsv.Document, error) {
-	res, err := loadDoc(cfg, path)
+func loadDoc(cfg *config, path string, zipLoadData bool) (*excsv.ParseResult, error) {
+	opts := cfg.parseOpts()
+	opts.ZipLoadData = zipLoadData
+	return excsv.ParseFile(path, opts)
+}
+
+func loadDocOnly(cfg *config, path string, zipLoadData bool) (*excsv.Document, error) {
+	res, err := loadDoc(cfg, path, zipLoadData)
 	if err != nil {
 		return nil, err
 	}

@@ -32,6 +32,14 @@ type ZipError struct {
 
 func (e *ZipError) Error() string { return string(e.Kind) + ": " + e.Message }
 
+type InspectResult struct {
+	Comment          string
+	PrimaryName      string
+	UncompressedSize int64
+	PrimaryIndex     int
+	primary          *zip.File
+}
+
 type ExtractResult struct {
 	Inner            []byte
 	Comment          string
@@ -40,13 +48,8 @@ type ExtractResult struct {
 	PrimaryIndex     int
 }
 
-var supportedMethods = map[uint16]bool{
-	zip.Store:   true,
-	zip.Deflate: true,
-	12:          true, // bzip2
-}
-
-func Extract(archivePath string, data []byte) (*ExtractResult, error) {
+// Inspect reads the ZIP central directory and archive comment without decompressing the primary entry.
+func Inspect(archivePath string, data []byte) (*InspectResult, error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return nil, err
@@ -75,17 +78,44 @@ func Extract(archivePath string, data []byte) (*ExtractResult, error) {
 		}
 	}
 
-	inner, err := readEntry(data, primary)
-	if err != nil {
-		return nil, err
-	}
-
-	return &ExtractResult{
-		Inner:            inner,
+	return &InspectResult{
 		Comment:          comment,
 		PrimaryName:      primary.Name,
 		UncompressedSize: int64(primary.UncompressedSize64),
 		PrimaryIndex:     idx,
+		primary:          primary,
+	}, nil
+}
+
+// ExtractPrimary decompresses the primary entry identified by a prior Inspect call.
+func ExtractPrimary(zipData []byte, ins *InspectResult) ([]byte, error) {
+	if ins == nil || ins.primary == nil {
+		return nil, &ZipError{Kind: ErrPrimaryMissing, Message: "no primary entry"}
+	}
+	return readEntry(zipData, ins.primary)
+}
+
+var supportedMethods = map[uint16]bool{
+	zip.Store:   true,
+	zip.Deflate: true,
+	12:          true, // bzip2
+}
+
+func Extract(archivePath string, data []byte) (*ExtractResult, error) {
+	ins, err := Inspect(archivePath, data)
+	if err != nil {
+		return nil, err
+	}
+	inner, err := ExtractPrimary(data, ins)
+	if err != nil {
+		return nil, err
+	}
+	return &ExtractResult{
+		Inner:            inner,
+		Comment:          ins.Comment,
+		PrimaryName:      ins.PrimaryName,
+		UncompressedSize: ins.UncompressedSize,
+		PrimaryIndex:     ins.PrimaryIndex,
 	}, nil
 }
 

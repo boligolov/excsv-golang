@@ -18,7 +18,7 @@ See also: [`sources_and_specifications.md`](sources_and_specifications.md).
 | Row ZIP read/write | Done — `pkg/excsv/zip`, transparent open |
 | Core CLI | Partial — see §5.2 implemented commands |
 | CSV/TSV import (I1) | Done — `excsv convert` + `ImportDelimited` |
-| ExCSV → plain data (I2) | Done — `excsv clean` |
+| ExCSV → plain data (I2) | Done — `excsv strip` |
 | Full command tree | Not done — column/sql/agg/checksum/freeze/diff/tidy deferred |
 | Streaming (A8–A10) | Not done |
 | `##` round-trip on serialize | Partial — parsed by default; `SerializeCanonical` does not yet re-emit `##` |
@@ -118,7 +118,7 @@ Parsing follows README-LLM § PARSING ALGORITHM. Serialization follows § SERIAL
 
 ```
 ParsePath(path, data, opts) → ParseResult
-  1. If .excsv.zip / .ecsv.zip extension OR PK\x03\x04 magic → zip.Extract → ParseBytes(inner)
+  1. If .excsv.zip / .ecsv.zip extension OR PK\x03\x04 magic → zip.Inspect; metadata from archive comment; inner decompress only when `ZipLoadData` (validate/strip/cat)
   2. Else → ParseBytes as plain ExCSV
   3. .pack. paths → fail gracefully (pack not supported)
 ```
@@ -160,8 +160,8 @@ Sniffs delimiter (comma/tab/pipe/semicolon) and quote style; builds `Document` w
 
 | Mode | Data scan | Typical commands |
 | --- | --- | --- |
-| **A — metadata-only** | No | `header list`, `meta list`, `zip peek` |
-| **B — data-aware** | Yes | `rows count`, `clean`, `convert`, `validate` |
+| **A — metadata-only** | No | `header`/`meta`/`sql` list & get, `info`, `rows` (ZIP: archive comment) |
+| **B — data-aware** | Yes | `strip`, `convert`, `validate` |
 
 Mode B auto-sync of `rows=`, `checksum=`, `#%` on write — planned (P6); partially available via `ImportOptions.Checksum` and `SetDataChecksum`.
 
@@ -188,10 +188,11 @@ Mode B auto-sync of `rows=`, `checksum=`, `#%` on write — planned (P6); partia
 
 | Function | Status |
 | --- | --- |
-| `Extract(archivePath, data)` | Done — primary entry, decompress, comment |
+| `Inspect(archivePath, data)` | Done — central dir + comment, no decompress |
+| `ExtractPrimary` / `Extract` | Done — decompress primary when data needed |
 | `Wrap(inner, entryName, comment)` | Done — two-pass `original-size`, deflate |
 | `locatePrimary`, `buildComment`, `truncateComment` | Done |
-| `RefreshComment` / dedicated peek API | Not exposed on CLI (`zip peek` uses Extract) |
+| `RefreshComment` | Not exposed on CLI |
 
 ---
 
@@ -223,20 +224,22 @@ excsv
 ├── info [file]             # N1 summary (--json)
 ├── cat [file]              # canonical inner document (unwraps zip)
 ├── header
-│   ├── list [file]
-│   └── get KEY [file]
+│   ├── list FILE
+│   └── get [KEY] FILE
 ├── meta
-│   └── list [file]
-├── rows
-│   └── count [file]
-├── clean [file]            # I2 — strip # lines, print data rows as CSV/TSV
+│   ├── list FILE
+│   └── get [KEY] FILE
+├── rows FILE              # alias: header get rows FILE
+├── sql
+│   ├── list FILE
+│   └── get [KEY] FILE
+├── strip [file]            # I2 — remove ExCSV metadata, print data rows as CSV/TSV
 ├── convert [file]          # I1 — CSV/TSV → ExCSV
 │   # flags: -o, --delim, --quote, --no-header, --columns,
 │   #        --checksum, --meta KEY:VAL, --zip
 ├── zip
 │   ├── wrap INPUT -o OUT
-│   ├── unwrap INPUT.zip -o OUT
-│   └── peek INPUT.zip
+│   └── unwrap INPUT.zip -o OUT
 └── version                 # prints version + build timestamp
 ```
 
@@ -244,7 +247,7 @@ excsv
 
 ```
 excsv
-├── header set/unset, meta get/set/import, column …, agg …, sql …
+├── header set/unset, meta set/import, column …, agg …
 ├── rows head/tail/slice, data print/get
 ├── convert normalize, to-tsv          # I3 — or separate commands
 ├── zip refresh-comment
@@ -252,9 +255,9 @@ excsv
 └── open (alias of cat)
 ```
 
-**Naming note:** I2 (ExCSV → delimited) is **`clean`**, not `convert to-csv`. I1 (delimited → ExCSV) is top-level **`convert`**.
+**Naming note:** I2 (ExCSV → delimited) is **`strip`**, not `convert to-csv`. I1 (delimited → ExCSV) is top-level **`convert`**.
 
-**Output family rule:** `convert --zip` wraps output; otherwise plain `.excsv`. `clean` always prints delimited text to stdout.
+**Output family rule:** `convert --zip` wraps output; otherwise plain `.excsv`. `strip` always prints delimited text to stdout.
 
 ### 5.3 Command → feature mapping
 
@@ -262,10 +265,10 @@ excsv
 | --- | --- | --- | --- |
 | Core parse/serialize | A1–A7 | 1–2 | Done (A7 partial: ## parse yes, serialize no) |
 | Import | I1 | 1 | Done |
-| Export data | I2 | 1 | Done (`clean`) |
+| Export data | I2 | 1 | Done (`strip`) |
 | Zip container | J1–J6 | 2 | Done (J4 CLI pending) |
 | Header / meta read | B*, C* partial | 1 | Partial |
-| Data read | G1 partial | 1 | `rows count` only |
+| Data read | G1 partial | 1 | use `header get rows` or `rows` alias |
 | Integrity CLI | M2–M3 | 1–2 | Library only |
 | Convert I3, H*, rest | — | 3+ | Not started |
 
@@ -305,7 +308,7 @@ Work in two waves per upstream plan. **Do not start wave 2 until wave 1 fixture 
 
 **Milestone 1.5 — Mode B read + convert** — [~] partial
 
-- [x] `rows count`, `clean`, `convert` (from-csv)
+- [x] `rows` (alias), `strip`, `convert` (from-csv)
 - [ ] `data print`, checksum/freeze CLI, agg compute
 
 Target: all **36** plain valid + **26** plain invalid fixtures green — **done**.
@@ -318,7 +321,7 @@ Target: all **36** plain valid + **26** plain invalid fixtures green — **done*
 
 **Milestone 2.3 — zip CLI** — [~] partial
 
-- [x] `zip wrap`, `unwrap`, `peek`
+- [x] `zip wrap`, `unwrap` (no `peek`; metadata via comment + `ZipLoadData=false`)
 - [ ] `refresh-comment`
 
 **Milestone 2.4 — zip + Mode B** — [x] basic
@@ -390,7 +393,7 @@ Import lenient: return `ImportResult{Doc, Warnings}` with padded/truncated rows.
 | --- | --- |
 | Stdin (plain or zip) | Not supported — FILE required on all read commands |
 | Atomic in-place (P1) | Not done |
-| `--json` | Partial (`validate`, `info`, `rows count`, `convert`) |
+| `--json` | Partial (`validate`, `info`, `convert`) |
 | UTF-8 | Required on import; encoding header on ExCSV output |
 
 ---
@@ -419,7 +422,7 @@ Unchanged — see prior plan. Pack format, `#table`/`#fk`, SQL execution, encryp
 | Wave | Done when | Status |
 | --- | --- | --- |
 | **1 — plain** | Fixtures green; validate, convert, basic read CLI | **Done** |
-| **2 — zip** | Zip fixtures green; wrap/unwrap/peek; transparent open | **Done** |
+| **2 — zip** | Zip fixtures green; wrap/unwrap; comment metadata; transparent open | **Done** |
 | **RF complete** | Waves 1–2 + README + importable `pkg/excsv` | **Core done**; full CLI tree remains |
 
 ---
