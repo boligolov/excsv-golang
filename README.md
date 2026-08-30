@@ -2,7 +2,7 @@
 
 Go reference implementation of **excsv-cli** — a command-line tool and library for [ExCSV](https://github.com/boligolov/excsv) v0.4 (Extended CSV).
 
-Supports **plain** (`.excsv`, `.ecsv`, `.extsv` sidecars), **row ZIP** (`.excsv.zip`, `.ecsv.zip`), and **pack** (`.excsv.pack.zip`).
+Supports **plain** (`.excsv`, `.ecsv`, `.extsv` sidecars), **JSON** (`.excsv.json`), **row ZIP** (`.excsv.zip`, `.ecsv.zip`), and **pack** (`.excsv.pack.zip`).
 
 ## Requirements
 
@@ -136,10 +136,11 @@ go test ./internal/cli -run TestCLIValidateFixtures -count=1
 ### Manual spot-check
 
 ```powershell
-.\bin\excsv.exe validate test\fixtures\plain\valid\020_canonical_full_small.excsv
-.\bin\excsv.exe validate test\fixtures\plain\invalid\017_checksum_mismatch.excsv   # exit 2
-.\bin\excsv.exe info test\fixtures\plain\valid\037_sidecar_csv_sibling.excsv
-.\bin\excsv.exe info test\fixtures\plain\valid\037_sidecar_csv_sibling.csv      # discovers .excsv sidecar
+.\bin\excsv.exe test\fixtures\plain\valid\020_canonical_full_small.excsv validate
+.\bin\excsv.exe test\fixtures\plain\invalid\017_checksum_mismatch.excsv validate   # exit 2
+.\bin\excsv.exe test\fixtures\plain\valid\037_sidecar_csv_sibling.excsv info
+.\bin\excsv.exe test\fixtures\plain\valid\037_sidecar_csv_sibling.csv info      # discovers .excsv sidecar
+.\bin\excsv.exe test\fixtures\plain\valid\020_canonical_full_small.excsv export json -o tmp\020.excsv.json
 ```
 
 When upstream adds or changes fixtures, re-sync then re-run both test paths:
@@ -152,15 +153,23 @@ go test ./internal/cli -run TestCLIValidateFixtures -count=1
 
 ## Continuous integration
 
-GitHub Actions on **push to `main`** and **PRs to `main`**:
+GitHub Actions:
 
-1. **test** — shallow-clone [boligolov/excsv](https://github.com/boligolov/excsv) fixtures, `go test ./...`
-2. **build** — cross-compile Windows, Linux, macOS (amd64 + arm64)
-3. **bundle** — on push to `main`, artifact `excsv-binaries`
+| Workflow | Trigger | Result |
+| --- | --- | --- |
+| **CI** (`.github/workflows/ci.yml`) | push / PR → `main` | test + cross-compile 6 platforms; artifact `excsv-binaries` on push to `main` |
+| **Release** (`.github/workflows/release.yml`) | tag `v*` (e.g. `v0.0.2`) | test + build + [GitHub Release](https://docs.github.com/en/repositories/releasing-projects-on-github) with binaries + `SHA256SUMS.txt` |
 
-View runs: repo **Actions** tab. Download binaries: green run on `main` → **Artifacts**.
+Version stamped into binaries: latest `v*` tag via `git describe`, or `internal/cli/version.go` when untagged.
 
-No secrets required for build/test.
+**Cut a release:**
+
+```powershell
+git tag v0.0.2
+git push origin v0.0.2
+```
+
+No secrets required — `GITHUB_TOKEN` publishes the release automatically.
 
 ## Usage
 
@@ -180,7 +189,6 @@ excsv data.excsv fix --only agg,checksum --dry-run
 
 # Summary
 excsv data.excsv info
-excsv data.excsv info --json
 
 # Convert CSV/TSV → ExCSV (or re-encode an existing document)
 excsv data.csv convert -o data.excsv
@@ -188,7 +196,7 @@ excsv data.tsv convert -o data.extsv --format sidecar
 excsv data.excsv convert --delim tab -o data.extsv
 
 # Data section
-excsv data.excsv data print -o data.csv
+excsv data.excsv data print -o data.csv               # strip equivalent
 excsv data.excsv data print --limit 20 --select id,amount
 excsv data.excsv data get 0 amount
 excsv data.excsv data append --row "3,9.50"
@@ -204,7 +212,8 @@ excsv data.excsv meta set author --value "author@example.com"
 excsv data.excsv sql dialect set postgres
 
 # Export (never modifies FILE)
-excsv data.excsv export json -o data.excsv.json
+excsv data.excsv export json                          # v0.4 JSON form → stdout
+excsv data.excsv export json -o data.excsv.json       # same document, .excsv.json encoding
 excsv data.excsv export csvw --url data.csv -o data.csv-metadata.json
 
 # Pack / ZIP
@@ -216,11 +225,13 @@ excsv data.excsv.zip zip unwrap -o data.excsv
 
 **Pattern:** `excsv [flags] FILE <command> …`. Full map: [`docs/cli_commands_map.md`](docs/cli_commands_map.md).
 
+**JSON:** `export json` writes the normative v0.4 document encoding (`.excsv.json`) — a bijection with the text form except `##` human comments, which are reported on stderr. Defaults to stdout; `-o` writes a file. Works on plain, sidecar, row ZIP, and pack.
+
 **Sidecar:** `excsv sales.csv …` auto-discovers `sales.excsv` / `.extsv`; data writes also update the referenced CSV.
 
-**Row ZIP:** `info` / `header` / `meta` / `sql` / `header rows` / `column list` read the archive comment; `validate --with-data` / `data print` / `fix` / `export` decompress the inner `.excsv`.
+**Row ZIP:** `info` / `header` / `meta` / `sql` / `header rows` / `column list` read the archive comment; `validate --with-data` / `data print` / `fix` / `export json` decompress the inner `.excsv`.
 
-**Flags:** `--strict` (default), `--lenient`, `--json`, `--clean-human-comments`, `--zip-password`, `--expect-profile` (`stub` | `sidecar` | `sidecar_strict`).
+**Flags:** `--strict` (default), `--lenient`, `--clean-human-comments`, `--zip-password`, `--expect-profile` (`stub` | `sidecar` | `sidecar_strict`).
 
 ## Library
 

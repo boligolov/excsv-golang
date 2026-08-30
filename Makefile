@@ -18,8 +18,10 @@ BIN_DIR  := bin
 CLI_PKG     := $(shell go list -f '{{.ImportPath}}' ./internal/cli 2>/dev/null)
 GENCLI_PKG  := $(shell go list -f '{{.ImportPath}}' ./internal/gencsv 2>/dev/null)
 BUILD_TIME  := $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || powershell -NoProfile -Command "(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')")
-LDFLAGS     := -s -w -X $(CLI_PKG).Version=0.2.0 -X $(CLI_PKG).BuildTime=$(BUILD_TIME)
-GEN_LDFLAGS := -s -w -X $(GENCLI_PKG).Version=0.1.0 -X $(GENCLI_PKG).BuildTime=$(BUILD_TIME)
+VERSION     := $(shell bash scripts/version.sh 2>/dev/null || grep -m1 'Version   = ' internal/cli/version.go | sed 's/.*"\(.*\)".*/\1/')
+GEN_VERSION := $(shell grep -m1 'Version   = ' internal/gencsv/cli.go | sed 's/.*"\(.*\)".*/\1/')
+LDFLAGS     := -s -w -X $(CLI_PKG).Version=$(VERSION) -X $(CLI_PKG).BuildTime=$(BUILD_TIME)
+GEN_LDFLAGS := -s -w -X $(GENCLI_PKG).Version=$(GEN_VERSION) -X $(GENCLI_PKG).BuildTime=$(BUILD_TIME)
 
 ifeq ($(CLI_PKG),)
 $(error go list ./internal/cli failed — run make from the module root with Go installed)

@@ -46,16 +46,40 @@ function Get-GencsvPackage {
     return $pkg.Trim()
 }
 
+function Get-Version {
+    $desc = git describe --tags --match 'v*' --always --dirty 2>$null
+    if ($LASTEXITCODE -eq 0 -and $desc) {
+        return ($desc -replace '^v', '')
+    }
+    $line = Select-String -Path 'internal/cli/version.go' -Pattern 'Version\s+=\s+"([^"]+)"' |
+        Select-Object -First 1
+    if (-not $line) {
+        throw 'could not read Version from internal/cli/version.go'
+    }
+    return $line.Matches.Groups[1].Value
+}
+
+function Get-GencsvVersion {
+    $line = Select-String -Path 'internal/gencsv/cli.go' -Pattern 'Version\s+=\s+"([^"]+)"' |
+        Select-Object -First 1
+    if (-not $line) {
+        throw 'could not read Version from internal/gencsv/cli.go'
+    }
+    return $line.Matches.Groups[1].Value
+}
+
 function Get-LdFlags {
     $module = Get-CliPackage
     $buildTime = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    return "-s -w -X ${module}.Version=0.2.0 -X ${module}.BuildTime=$buildTime"
+    $version = Get-Version
+    return "-s -w -X ${module}.Version=$version -X ${module}.BuildTime=$buildTime"
 }
 
 function Get-GenLdFlags {
     $module = Get-GencsvPackage
     $buildTime = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    return "-s -w -X ${module}.Version=0.1.0 -X ${module}.BuildTime=$buildTime"
+    $version = Get-GencsvVersion
+    return "-s -w -X ${module}.Version=$version -X ${module}.BuildTime=$buildTime"
 }
 
 function Get-NativePlatform {
