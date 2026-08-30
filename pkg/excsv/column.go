@@ -136,16 +136,16 @@ func (doc *Document) RemoveColumn(name string) bool {
 }
 
 func FormatColumnAttrs(attrs map[string]string) string {
-	return formatColumnAttrParts(attrs, formatColumnAttr)
+	return formatColumnAttrParts(attrs, formatColumnAttr, " ")
 }
 
 // FormatColumnInfoLine renders #column attributes for `info header` output:
 // name: order_id, title: "Order ID", type: long
 func FormatColumnInfoLine(attrs map[string]string) string {
-	return formatColumnAttrParts(attrs, formatColumnInfoAttr)
+	return formatColumnAttrParts(attrs, formatColumnInfoAttr, ", ")
 }
 
-func formatColumnAttrParts(attrs map[string]string, format func(k, v string) string) string {
+func formatColumnAttrParts(attrs map[string]string, format func(k, v string) string, sep string) string {
 	seen := map[string]bool{}
 	var parts []string
 	for _, k := range columnAttrDisplayOrder {
@@ -166,7 +166,7 @@ func formatColumnAttrParts(attrs map[string]string, format func(k, v string) str
 	for _, k := range extra {
 		parts = append(parts, format(k, attrs[k]))
 	}
-	return strings.Join(parts, ", ")
+	return strings.Join(parts, sep)
 }
 
 func formatColumnInfoAttr(k, v string) string {
