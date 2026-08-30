@@ -16,30 +16,6 @@ Supports **plain** (`.excsv`, `.ecsv`, `.extsv` sidecars), **JSON** (`.excsv.jso
 ## Build
 
 ```powershell
-# Fast local build -> bin\excsv.exe
-.\makefile.ps1
-
-# Flush Go cache + force full rebuild (use when changes don't show up)
-.\makefile.ps1 rebuild
-
-# Or manually:
-go build -trimpath -o bin/excsv.exe ./cmd/excsv
-```
-
-Verify you picked up the new binary:
-
-```powershell
-.\bin\excsv.exe version
-# excsv-cli 0.0.3 (built …)
-```
-
-> If rebuild fails with "Cannot remove stale binary", close any running `excsv.exe` first — Windows locks the file while it's in use.
->
-> **Wrong platform / exe won't start:** If you ran `build-all` in the same PowerShell session before an older `makefile.ps1`, `GOOS`/`GOARCH` could leak and produce a non-Windows `bin\excsv.exe`. Run `.\makefile.ps1 rebuild` (fixed in current script) or use `bin\excsv-windows-amd64.exe` directly.
-
-Cross-platform builds:
-
-```powershell
 # Windows (PowerShell)
 .\makefile.ps1 build-all
 
@@ -161,8 +137,8 @@ GitHub Actions:
 
 | Workflow | Trigger | Result |
 | --- | --- | --- |
-| **CI** (`.github/workflows/ci.yml`) | push / PR → `main` | test + cross-compile 6 platforms; artifact `excsv-binaries` on push to `main` |
-| **Release** (`.github/workflows/release.yml`) | tag `v*` (e.g. `v0.0.3`) | test + build + GitHub Release: `excsv-{os}-{arch}.zip` (contains `excsv` / `excsv.exe` + zip comment banner) + `SHA256SUMS.txt` |
+| **CI** (`.github/workflows/ci.yml`) | push / PR → `main` | `go test ./...` with upstream fixtures |
+| **Release** (`.github/workflows/release.yml`) | tag `v*` (e.g. `v0.0.3`) | test + cross-compile 6 platforms + GitHub Release: `excsv-{os}-{arch}.zip` + `SHA256SUMS.txt` |
 
 Version stamped into binaries: latest `v*` tag via `git describe`, or `internal/cli/version.go` when untagged.
 
