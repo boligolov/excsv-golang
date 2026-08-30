@@ -51,7 +51,7 @@ func newAggCmd(cfg *config) *cobra.Command {
 }
 
 func runAggList(cfg *config, path string) {
-	doc, err := loadDocOnly(cfg, path, false)
+	doc, err := loadTableDoc(cfg, path, true)
 	if err != nil {
 		exitParseErr(err)
 	}
@@ -70,7 +70,7 @@ func runAggList(cfg *config, path string) {
 }
 
 func runAggGet(cfg *config, name, path string) {
-	doc, err := loadDocOnly(cfg, path, false)
+	doc, err := loadTableDoc(cfg, path, true)
 	if err != nil {
 		exitParseErr(err)
 	}

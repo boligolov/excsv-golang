@@ -14,26 +14,43 @@ cd "$ROOT"
 UPSTREAM_BASE="https://raw.githubusercontent.com/boligolov/excsv/master"
 FIXTURE_BASE="${UPSTREAM_BASE}/fixtures"
 
-# Normative LLM spec: root hub + per-topic files under docs/llm/ (upstream split).
-LLM_TOPIC_FILES=(
-  README.md
+# Human-readable guide: docs/*.md. Normative parser spec: docs/implementation/*.md.
+GUIDE_FILES=(
   aggregations.md
-  canonical-example.md
   checksum.md
   columns.md
-  csvw.md
+  data-section.md
+  file-metadata.md
+  file-structure.md
+  full-example.md
+  header.md
+  introduction.md
+  json.md
+  license.md
+  meta-lines.md
+  pack.md
+  prior-art.md
+  sql.md
+  zip.md
+)
+
+IMPLEMENTATION_FILES=(
+  README.md
+  aggregations.md
+  checksum.md
+  columns.md
   data-section.md
   error-handling.md
   file-metadata.md
   file-structure.md
+  full-example.md
   header.md
-  identity.md
+  introduction.md
+  json.md
   license.md
   meta-lines.md
-  parsing.md
-  quick-reference.md
-  reserved.md
-  serialization.md
+  pack.md
+  prior-art.md
   sql.md
   zip.md
 )
@@ -61,14 +78,20 @@ download() {
 
 if [[ "$FIXTURES_ONLY" -eq 0 ]]; then
   echo "Downloading spec/plan snapshots..."
-  mkdir -p docs/downloaded/llm test/fixtures
-  download "${UPSTREAM_BASE}/README-LLM.md" docs/downloaded/README-LLM.md
+  mkdir -p docs/downloaded/guide docs/downloaded/implementation docs/downloaded/schema test/fixtures
+  download "${UPSTREAM_BASE}/README.md" docs/downloaded/README.md
+  download "${UPSTREAM_BASE}/docs/README.md" docs/downloaded/guide/README.md
   download "${UPSTREAM_BASE}/plan/README.md" docs/downloaded/plan-README.md
   download "${UPSTREAM_BASE}/plan/01-features.md" docs/downloaded/plan-01-features.md
   download "${UPSTREAM_BASE}/plan/02-fixtures.md" docs/downloaded/plan-02-fixtures.md
   download "${FIXTURE_BASE}/fixtures.yaml" test/fixtures/fixtures.yaml
-  for name in "${LLM_TOPIC_FILES[@]}"; do
-    download "${UPSTREAM_BASE}/docs/llm/${name}" "docs/downloaded/llm/${name}"
+  download "${UPSTREAM_BASE}/schema/excsv.schema.json" docs/downloaded/schema/excsv.schema.json
+  download "${UPSTREAM_BASE}/schema/example.excsv.json" docs/downloaded/schema/example.excsv.json
+  for name in "${GUIDE_FILES[@]}"; do
+    download "${UPSTREAM_BASE}/docs/${name}" "docs/downloaded/guide/${name}"
+  done
+  for name in "${IMPLEMENTATION_FILES[@]}"; do
+    download "${UPSTREAM_BASE}/docs/implementation/${name}" "docs/downloaded/implementation/${name}"
   done
 fi
 
@@ -88,14 +111,32 @@ if [[ "$SPECS_ONLY" -eq 0 ]]; then
   echo "Downloading ${#PATHS[@]} fixture file(s) from manifest..."
   for rel in "${PATHS[@]}"; do
     case "$rel" in
-      plain/*|zip/*|pack/*) ;;
+      pack/*)
+        continue
+        ;;
+      zip/*)
+        continue
+        ;;
+      plain/*) ;;
       *)
         echo "warning: skipping unexpected path: $rel" >&2
         continue
         ;;
     esac
-    download "${FIXTURE_BASE}/${rel}" "test/fixtures/${rel}"
+    download "${FIXTURE_BASE}/${rel}" "test/fixtures/${rel}" || echo "warning: skip ${rel}" >&2
   done
+
+  echo "Generating zip fixtures from upstream generator..."
+  SPEC_DIR="${TMPDIR:-/tmp}/excsv-spec-sync"
+  if [[ ! -d "$SPEC_DIR/.git" ]]; then
+    rm -rf "$SPEC_DIR"
+    git clone --depth 1 https://github.com/boligolov/excsv.git "$SPEC_DIR"
+  fi
+  python3 "$SPEC_DIR/fixtures/generate/make_zip_fixtures.py"
+  python3 "$SPEC_DIR/fixtures/generate/make_pack_fixtures.py"
+  rm -rf test/fixtures/zip test/fixtures/pack
+  cp -r "$SPEC_DIR/fixtures/zip" test/fixtures/zip
+  cp -r "$SPEC_DIR/fixtures/pack" test/fixtures/pack
 fi
 
 echo "Done."

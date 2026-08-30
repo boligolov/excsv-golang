@@ -19,6 +19,13 @@ var standardAggregations = map[string]bool{
 	"len_max":        true,
 }
 
+// AllAggregations is every standard #% name, in canonical order. It is what
+// `convert --agg all` expands to.
+var AllAggregations = []string{
+	"count_nonnull", "count_null", "count_distinct",
+	"sum", "avg", "min", "max", "len_min", "len_max",
+}
+
 // ComputeAggregationValues calculates per-column #% values for a standard aggregation name.
 func ComputeAggregationValues(doc *Document, name string) ([]string, error) {
 	if !standardAggregations[name] {
@@ -64,8 +71,28 @@ func columnTypeAt(doc *Document, col int) string {
 
 func isMeasureColumnType(t string) bool {
 	switch t {
+	case "int", "long", "float", "double", "decimal", "number":
+		return true
+	default:
+		return false
+	}
+}
+
+// numericAggApplies: floats/decimals always (unless role=id or agg=none).
+// int/long only when role=measure — bare type=int is usually an identifier (fixture 011).
+func numericAggApplies(doc *Document, col int) bool {
+	if columnRoleAt(doc, col) == "id" {
+		return false
+	}
+	if columnAggHintAt(doc, col) == "none" {
+		return false
+	}
+	ct := columnTypeAt(doc, col)
+	switch ct {
 	case "float", "double", "decimal", "number":
 		return true
+	case "int", "long":
+		return columnRoleAt(doc, col) == "measure"
 	default:
 		return false
 	}
@@ -78,6 +105,36 @@ func isStringColumnType(t string) bool {
 	default:
 		return t == ""
 	}
+}
+
+func columnRoleAt(doc *Document, col int) string {
+	for i, c := range doc.Meta.Columns {
+		idx := i
+		if v, ok := c.Attrs["index"]; ok {
+			if n, err := strconv.Atoi(v); err == nil {
+				idx = n
+			}
+		}
+		if idx == col {
+			return strings.ToLower(strings.TrimSpace(c.Attrs["role"]))
+		}
+	}
+	return ""
+}
+
+func columnAggHintAt(doc *Document, col int) string {
+	for i, c := range doc.Meta.Columns {
+		idx := i
+		if v, ok := c.Attrs["index"]; ok {
+			if n, err := strconv.Atoi(v); err == nil {
+				idx = n
+			}
+		}
+		if idx == col {
+			return strings.ToLower(strings.TrimSpace(c.Attrs["agg"]))
+		}
+	}
+	return ""
 }
 
 func cellAt(doc *Document, row []string, col int) string {
@@ -114,7 +171,7 @@ func computeAggColumn(doc *Document, name string, col int) (string, error) {
 	case "count_distinct":
 		return formatInt(countDistinct(doc, col)), nil
 	case "sum", "avg", "min", "max":
-		if !isMeasureColumnType(ct) {
+		if !numericAggApplies(doc, col) {
 			return "", nil
 		}
 		return computeNumericAgg(doc, name, col)

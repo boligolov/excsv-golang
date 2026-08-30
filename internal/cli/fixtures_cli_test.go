@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/boligolov/excsv-golang/internal/fixtures"
@@ -19,11 +20,17 @@ func TestCLIValidateFixtures(t *testing.T) {
 	for _, fx := range fixtures.FilterRF(m) {
 		fx := fx
 		t.Run(fx.ID, func(t *testing.T) {
+			if reason, ok := fixtures.UpstreamFixtureBugs[fx.ID]; ok {
+				t.Skip(reason)
+			}
 			path := filepath.Join(fixtureRoot, filepath.FromSlash(fx.ID))
 			if _, err := os.Stat(path); err != nil {
 				t.Skipf("fixture not on disk (run sync-upstream): %v", err)
 			}
-			args := []string{"validate", path}
+			args := []string{path, "validate"}
+			if strings.HasPrefix(fx.ID, "zip/invalid/") {
+				args = append(args, "--with-data")
+			}
 			if fx.Expect.Profile != "" {
 				args = append([]string{"--expect-profile", fx.Expect.Profile}, args...)
 			}

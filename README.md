@@ -1,8 +1,8 @@
 # excsv-golang
 
-Go reference implementation of **excsv-cli** — a command-line tool and library for [ExCSV](https://github.com/boligolov/excsv) v0.2 (Extended CSV).
+Go reference implementation of **excsv-cli** — a command-line tool and library for [ExCSV](https://github.com/boligolov/excsv) v0.4 (Extended CSV).
 
-Supports **plain** (`.excsv`, `.ecsv`, `.extsv` sidecars) and **row ZIP** (`.excsv.zip`, `.ecsv.zip`) storage forms. Pack format (`.excsv.pack.zip`) is not implemented yet.
+Supports **plain** (`.excsv`, `.ecsv`, `.extsv` sidecars), **row ZIP** (`.excsv.zip`, `.ecsv.zip`), and **pack** (`.excsv.pack.zip`).
 
 ## Requirements
 
@@ -26,7 +26,7 @@ Verify you picked up the new binary:
 
 ```powershell
 .\bin\excsv.exe version
-# excsv-cli 0.2.0 (built 2026-06-01T12:34:56Z)
+# excsv-cli 0.0.2 (built …)
 ```
 
 > If rebuild fails with "Cannot remove stale binary", close any running `excsv.exe` first — Windows locks the file while it's in use.
@@ -49,7 +49,7 @@ Binaries land in `bin/` (see `Makefile` / `makefile.ps1`).
 
 The fixture corpus lives under `test/fixtures/` and is **not committed** to this repo (see `.gitignore`). CI and local tests expect it to be present.
 
-**Authority:** [boligolov/excsv](https://github.com/boligolov/excsv) — manifest at `fixtures/fixtures.yaml`, files under `fixtures/plain/` and `fixtures/zip/`.
+**Authority:** [boligolov/excsv](https://github.com/boligolov/excsv) — manifest at `fixtures/fixtures.yaml`, files under `fixtures/plain/`, generated `fixtures/zip/` and `fixtures/pack/`.
 
 ### Download (recommended)
 
@@ -71,7 +71,7 @@ Partial sync:
 
 | Command | Gets |
 | --- | --- |
-| `.\makefile.ps1 sync-specs` | `docs/downloaded/README-LLM.md`, `docs/downloaded/llm/*.md`, plan snapshots + `test/fixtures/fixtures.yaml` |
+| `.\makefile.ps1 sync-specs` | `docs/downloaded/README.md`, `guide/`, `implementation/`, plan snapshots + `test/fixtures/fixtures.yaml` |
 | `.\makefile.ps1 sync-fixtures` | Fixture bytes only (needs `fixtures.yaml` already) |
 | `.\scripts\sync-upstream.ps1 -SpecsOnly` | Same as sync-specs |
 | `.\scripts\sync-upstream.ps1 -FixturesOnly` | Same as sync-fixtures |
@@ -84,19 +84,24 @@ test/fixtures/plain/valid/*.excsv
 test/fixtures/plain/invalid/*.excsv
 test/fixtures/zip/valid/*.excsv.zip
 test/fixtures/zip/invalid/*.excsv.zip
+test/fixtures/pack/valid/*.excsv.pack.zip
+test/fixtures/pack/invalid/*.excsv.pack.zip
 ```
 
 Sidecar pairs also pull sibling `.csv` / `.tsv` files listed as `data_sibling` in the manifest.
 
 ### Full upstream tree (optional)
 
-CI clones the entire `fixtures/plain` and `fixtures/zip` trees from upstream (not just manifest-listed paths). Equivalent locally:
+CI clones the entire `fixtures/plain` tree from upstream and generates `zip` + `pack`. Equivalent locally:
 
 ```bash
 git clone --depth 1 https://github.com/boligolov/excsv.git /tmp/excsv-spec
 cp /tmp/excsv-spec/fixtures/fixtures.yaml test/fixtures/
 cp -r /tmp/excsv-spec/fixtures/plain test/fixtures/
+python3 /tmp/excsv-spec/fixtures/generate/make_zip_fixtures.py
+python3 /tmp/excsv-spec/fixtures/generate/make_pack_fixtures.py
 cp -r /tmp/excsv-spec/fixtures/zip test/fixtures/
+cp -r /tmp/excsv-spec/fixtures/pack test/fixtures/
 ```
 
 More detail: [`docs/sources_and_specifications.md`](docs/sources_and_specifications.md).
@@ -121,7 +126,7 @@ make sync-upstream && make test
 
 ### Compiled CLI against fixtures
 
-Builds `bin/excsv` if needed, then runs `excsv validate` on every `plain/*` and `zip/*` manifest entry:
+Builds `bin/excsv` if needed, then runs `excsv validate` on every `plain/*`, `zip/*`, and `pack/*` manifest entry:
 
 ```powershell
 .\makefile.ps1 build
@@ -162,48 +167,60 @@ No secrets required for build/test.
 Use `.\bin\excsv.exe` locally, or `excsv` if on your `PATH`.
 
 ```powershell
-# Validate
+# Validate (schema-only by default; --with-data for cells, rows=, checksum=, #%)
 excsv data.excsv validate
+excsv data.excsv validate --with-data
+excsv data.excsv validate --with-data --column amount
 excsv archive.excsv.zip validate
 
-# Summary (sidecar: profile + reference= when applicable)
+# Repair derived metadata in place
+excsv data.excsv fix
+excsv data.excsv fix --only format
+excsv data.excsv fix --only agg,checksum --dry-run
+
+# Summary
 excsv data.excsv info
 excsv data.excsv info --json
 
-# Print canonical inner document (unwraps zip; sidecar emits meta only)
-excsv archive.excsv.zip cat
-
-# Header and metadata (header is read-only; no header set)
-excsv data.excsv header list
-excsv data.excsv header get version
-excsv data.excsv meta list
-excsv data.excsv meta set author --value "author@example.com"
-
-# SQL companions (#$ddl / #$dql)
-excsv data.excsv sql list
-excsv data.excsv sql list --verb ddl --dialect postgres
-excsv data.excsv sql set ddl --value "CREATE TABLE t (id INT)"
-
-# Data
-excsv data.excsv rows
-excsv data.excsv strip
+# Convert CSV/TSV → ExCSV (or re-encode an existing document)
 excsv data.csv convert -o data.excsv
-excsv data.tsv convert -o data.excsv --columns
-excsv data.csv convert --sidecar -o data.excsv
-excsv data.csv convert -o out.excsv --delim pipe --quote double
+excsv data.tsv convert -o data.extsv --format sidecar
+excsv data.excsv convert --delim tab -o data.extsv
 
-# ZIP container
-excsv data.excsv wrap -o data.excsv.zip
-excsv data.excsv.zip unwrap -o data.excsv
+# Data section
+excsv data.excsv data print -o data.csv
+excsv data.excsv data print --limit 20 --select id,amount
+excsv data.excsv data get 0 amount
+excsv data.excsv data append --row "3,9.50"
+excsv data.excsv data sort --by amount:desc
+
+# Schema / metadata
+excsv data.excsv column list
+excsv data.excsv column set amount --attr type=decimal --attr unit=USD
+excsv data.excsv agg update sum
+excsv data.excsv header list          # read-only
+excsv data.excsv header rows
+excsv data.excsv meta set author --value "author@example.com"
+excsv data.excsv sql dialect set postgres
+
+# Export (never modifies FILE)
+excsv data.excsv export json -o data.excsv.json
+excsv data.excsv export csvw --url data.csv -o data.csv-metadata.json
+
+# Pack / ZIP
+excsv data.excsv pack create -o data.excsv.pack.zip
+excsv data.excsv.pack.zip pack table list
+excsv data.excsv zip wrap -o data.excsv.zip
+excsv data.excsv.zip zip unwrap -o data.excsv
 ```
 
-**Pattern:** `excsv [flags] FILE <command> …` — `FILE` is always first (after flags). `meta set` / `sql set` use `--value` (quoted string).
+**Pattern:** `excsv [flags] FILE <command> …`. Full map: [`docs/cli_commands_map.md`](docs/cli_commands_map.md).
 
-**Sidecar:** `excsv sales.csv …` auto-discovers `sales.excsv` / `.extsv`; writes go to the sidecar.
+**Sidecar:** `excsv sales.csv …` auto-discovers `sales.excsv` / `.extsv`; data writes also update the referenced CSV.
 
-**Row ZIP:** `info` / `header` / `meta` / `sql` / `rows` read the archive comment; `validate` / `strip` / `cat` decompress the inner `.excsv`.
+**Row ZIP:** `info` / `header` / `meta` / `sql` / `header rows` / `column list` read the archive comment; `validate --with-data` / `data print` / `fix` / `export` decompress the inner `.excsv`.
 
-**Flags:** `--strict` (default), `--lenient`, `--json`, `--clean-human-comments`, `--expect-profile` (`stub` | `sidecar` | `sidecar_strict`).
+**Flags:** `--strict` (default), `--lenient`, `--json`, `--clean-human-comments`, `--zip-password`, `--expect-profile` (`stub` | `sidecar` | `sidecar_strict`).
 
 ## Library
 
@@ -228,16 +245,17 @@ internal/fixtures/   Manifest loader (shared by library + CLI tests)
 pkg/excsv/           Core parser and serializer
 pkg/excsv/zip/       Row ZIP container
 test/fixtures/       Fixture corpus (gitignored; sync from upstream)
-docs/downloaded/     Spec hub + docs/downloaded/llm/ topics (gitignored; sync from upstream)
+docs/downloaded/     Spec hub + guide/ + implementation/ (gitignored; sync from upstream)
 ```
 
 ## Status
 
 | Wave | Scope | Status |
 | --- | --- | --- |
-| 1 | Plain `.excsv` parse, validate, basic CLI, sidecar | Done |
-| 2 | Row `.excsv.zip` read/write, zip CLI | Done |
-| 3+ | Pack, transforms, full command tree | Not yet |
+| 1 | Plain `.excsv` parse, convert, data, schema, sidecar | Done |
+| 2 | Row `.excsv.zip` read/write, zip CLI, password | Done |
+| 3 | Pack, grouped CLI (v0.0.2), validate/fix, export json/csvw | Done |
+| 4+ | Streaming, diff | Not yet |
 
 ## License
 

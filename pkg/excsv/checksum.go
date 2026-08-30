@@ -25,7 +25,7 @@ func verifyChecksum(dataSection string, cs *Checksum) error {
 	}
 	got, err := computeDataChecksum(dataSection, cs.Algorithm)
 	if err != nil {
-		return fail(ErrHeaderInvalidValue, 0, err.Error())
+		return fail(ErrChecksumUnknownAlgorithm, 0, err.Error())
 	}
 	if !strings.EqualFold(got, cs.Hex) {
 		return fail(ErrChecksumMismatch, 0, "checksum mismatch")

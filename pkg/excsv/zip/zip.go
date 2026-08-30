@@ -18,6 +18,8 @@ type ErrorKind string
 const (
 	ErrPrimaryNotFirst        ErrorKind = "zip_primary_not_first"
 	ErrEncrypted              ErrorKind = "zip_encrypted"
+	ErrPasswordRequired       ErrorKind = "zip_password_required"
+	ErrWrongPassword          ErrorKind = "zip_wrong_password"
 	ErrUnsupportedCompression ErrorKind = "zip_unsupported_compression"
 	ErrCommentNotUTF8         ErrorKind = "zip_comment_not_utf8"
 	ErrCommentNotExcsvPrefix  ErrorKind = "zip_comment_not_excsv_prefix"
@@ -33,11 +35,14 @@ type ZipError struct {
 func (e *ZipError) Error() string { return string(e.Kind) + ": " + e.Message }
 
 type InspectResult struct {
-	Comment          string
-	PrimaryName      string
-	UncompressedSize int64
-	PrimaryIndex     int
-	primary          *zip.File
+	Comment               string
+	PrimaryName           string
+	UncompressedSize      int64
+	PrimaryIndex          int
+	Encrypted             bool
+	CommentNotUTF8        bool
+	CommentNotExcsvPrefix bool
+	primary               *zip.File
 }
 
 type ExtractResult struct {
@@ -61,36 +66,39 @@ func Inspect(archivePath string, data []byte) (*InspectResult, error) {
 	if idx != 0 {
 		return nil, &ZipError{Kind: ErrPrimaryNotFirst, Message: "primary entry is not first"}
 	}
-	if primary.Flags&0x1 != 0 {
-		return nil, &ZipError{Kind: ErrEncrypted, Message: "encrypted entry"}
-	}
-	if !supportedMethods[primary.Method] {
+	encrypted := primary.Flags&0x1 != 0
+	if !encrypted && !supportedMethods[primary.Method] {
 		return nil, &ZipError{Kind: ErrUnsupportedCompression, Message: fmt.Sprintf("method %d", primary.Method)}
 	}
 
 	comment := zr.Comment
-	if comment != "" {
-		if !utf8.ValidString(comment) {
-			return nil, &ZipError{Kind: ErrCommentNotUTF8, Message: "invalid UTF-8 in comment"}
-		}
-		if !strings.HasPrefix(comment, "#!excsv") {
-			return nil, &ZipError{Kind: ErrCommentNotExcsvPrefix, Message: "comment must start with #!excsv"}
-		}
-	}
+	notUTF8 := comment != "" && !utf8.ValidString(comment)
+	notPrefix := !notUTF8 && comment != "" && !strings.HasPrefix(comment, "#!excsv")
 
 	return &InspectResult{
-		Comment:          comment,
-		PrimaryName:      primary.Name,
-		UncompressedSize: int64(primary.UncompressedSize64),
-		PrimaryIndex:     idx,
-		primary:          primary,
+		Comment:               comment,
+		PrimaryName:           primary.Name,
+		UncompressedSize:      int64(primary.UncompressedSize64),
+		PrimaryIndex:          idx,
+		Encrypted:             encrypted,
+		CommentNotUTF8:        notUTF8,
+		CommentNotExcsvPrefix: notPrefix,
+		primary:               primary,
 	}, nil
 }
 
 // ExtractPrimary decompresses the primary entry identified by a prior Inspect call.
 func ExtractPrimary(zipData []byte, ins *InspectResult) ([]byte, error) {
+	return ExtractPrimaryWithPassword(zipData, ins, "")
+}
+
+// ExtractPrimaryWithPassword decompresses the primary entry, using password when encrypted.
+func ExtractPrimaryWithPassword(zipData []byte, ins *InspectResult, password string) ([]byte, error) {
 	if ins == nil || ins.primary == nil {
 		return nil, &ZipError{Kind: ErrPrimaryMissing, Message: "no primary entry"}
+	}
+	if ins.Encrypted {
+		return readEncryptedEntry(zipData, ins.PrimaryName, password)
 	}
 	return readEntry(zipData, ins.primary)
 }
@@ -102,11 +110,16 @@ var supportedMethods = map[uint16]bool{
 }
 
 func Extract(archivePath string, data []byte) (*ExtractResult, error) {
+	return ExtractWithPassword(archivePath, data, "")
+}
+
+// ExtractWithPassword decompresses the primary entry, using password when encrypted.
+func ExtractWithPassword(archivePath string, data []byte, password string) (*ExtractResult, error) {
 	ins, err := Inspect(archivePath, data)
 	if err != nil {
 		return nil, err
 	}
-	inner, err := ExtractPrimary(data, ins)
+	inner, err := ExtractPrimaryWithPassword(data, ins, password)
 	if err != nil {
 		return nil, err
 	}
@@ -161,45 +174,32 @@ func compressedData(zipData []byte, name string) ([]byte, error) {
 	return nil, fmt.Errorf("zip entry %q not found", name)
 }
 
+func isPrimaryEntryName(name string) bool {
+	n := strings.ToLower(name)
+	return strings.HasSuffix(n, ".excsv") || strings.HasSuffix(n, ".ecsv") || strings.HasSuffix(n, ".extsv")
+}
+
 func locatePrimary(archivePath string, files []*zip.File) (*zip.File, int, error) {
 	if len(files) == 0 {
-		return nil, -1, &ZipError{Kind: ErrPrimaryMissing, Message: "empty archive"}
+		return nil, -1, &ZipError{Kind: ErrPrimaryNotFirst, Message: "empty archive"}
 	}
-	base := strings.TrimSuffix(filepath.Base(archivePath), ".zip")
-	base = strings.TrimSuffix(base, ".ZIP")
-	want := base
-	if !strings.HasSuffix(strings.ToLower(base), ".excsv") && !strings.HasSuffix(strings.ToLower(base), ".ecsv") {
-		want = base + ".excsv"
+	primary := files[0]
+	baseName := strings.ToLower(filepath.Base(primary.Name))
+	if !isPrimaryEntryName(baseName) {
+		return nil, -1, &ZipError{Kind: ErrPrimaryNotFirst, Message: "first entry is not a valid primary"}
 	}
-
-	var candidates []*zip.File
-	var indices []int
-	for i, f := range files {
-		n := f.Name
-		if strings.HasSuffix(strings.ToLower(n), ".excsv") || strings.HasSuffix(strings.ToLower(n), ".ecsv") {
-			candidates = append(candidates, f)
-			indices = append(indices, i)
-		}
-	}
-	if len(candidates) == 0 {
-		return nil, -1, &ZipError{Kind: ErrPrimaryMissing, Message: "no excsv entry"}
-	}
-
-	primary := candidates[0]
-	pidx := indices[0]
-	nameLower := strings.ToLower(filepath.Base(primary.Name))
-	wantLower := strings.ToLower(filepath.Base(want))
-	if nameLower == wantLower || nameLower == "data.excsv" || nameLower == "data.ecsv" {
-		return primary, pidx, nil
+	want := strings.ToLower(filepath.Base(strings.TrimSuffix(strings.TrimSuffix(filepath.Base(archivePath), ".zip"), ".ZIP")))
+	if baseName == want || baseName == "data.excsv" || baseName == "data.ecsv" || baseName == "data.extsv" {
+		return primary, 0, nil
 	}
 	return nil, -1, &ZipError{Kind: ErrPrimaryBadName, Message: primary.Name}
 }
 
 func Wrap(inner []byte, entryName string, comment string) ([]byte, error) {
-	patched, err := patchOriginalSize(inner)
-	if err != nil {
-		return nil, err
-	}
+	return WrapWithPassword(inner, entryName, comment, "")
+}
+
+func wrapPlain(patched []byte, entryName, comment string) ([]byte, error) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	h := &zip.FileHeader{Name: entryName, Method: zip.Deflate}

@@ -23,8 +23,6 @@ func ParseBytes(data []byte, opts ParseOptions) (*ParseResult, error) {
 		if !utf8.Valid(data) {
 			return nil, fail(ErrInvalidUTF8, 0, "invalid UTF-8")
 		}
-	} else if encodingMismatch(data, enc) {
-		return nil, fail(ErrEncodingMismatch, 0, "content appears UTF-8 but encoding declares "+enc)
 	}
 
 	if len(data) == 0 {
@@ -36,7 +34,15 @@ func ParseBytes(data []byte, opts ParseOptions) (*ParseResult, error) {
 	}
 
 	records := splitRecords(data)
-	return parseRecords(records, string(data), opts)
+	res, err := parseRecords(records, string(data), opts)
+	if err != nil {
+		return nil, err
+	}
+	if iss := encodingIssue(data, enc); iss != nil {
+		res.warn(iss.Kind, iss.Line, iss.Message)
+	}
+	appendExtsvWarning(res, opts.SourcePath)
+	return res, nil
 }
 
 func firstLineBytes(data []byte) string {
@@ -123,11 +129,18 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 		return nil, err
 	}
 
+	res := &ParseResult{Doc: doc}
+	collectHeaderWarnings(res, opts)
+
 	if opts.ExpectZipInner {
 		if doc.Header.OriginalSize == nil {
-			return nil, fail(ErrZipMissingOriginalSize, 1, "missing original-size in zipped inner file")
-		}
-		if opts.ZipUncompressedSize > 0 {
+			// Metadata-only row-ZIP reads (validate --schema-only, info, header)
+			// parse the ZIP comment, not the inner file — original-size belongs on
+			// the inner document and is enforced when ZipLoadData is true.
+			if opts.ZipLoadData {
+				return nil, fail(ErrZipMissingOriginalSize, 1, "missing original-size in zipped inner file")
+			}
+		} else if opts.ZipUncompressedSize > 0 {
 			got := *doc.Header.OriginalSize
 			want := opts.ZipUncompressedSize
 			if got != want && got != want-3 && got+3 != want {
@@ -139,6 +152,7 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 	d := doc.Header.Dialect()
 	metaStart := idx
 	lastWasSQL := false
+	lastSQLPayload := ""
 	for idx < len(records) {
 		line := records[idx].text
 		ln := records[idx].num
@@ -147,7 +161,7 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 			continue
 		}
 		if !strings.HasPrefix(line, "#") {
-			if lastWasSQL && !strings.ContainsRune(line, d.Delim) {
+			if lastWasSQL && sqlPayloadUnclosed(lastSQLPayload) {
 				return nil, fail(ErrSQLEmbeddedNewline, ln, "SQL statement spans multiple lines")
 			}
 			break
@@ -167,6 +181,23 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 			return nil, fail(ErrHeaderMalformedMagic, ln, "malformed header magic in meta section")
 		}
 		if isReservedMetaPrefix(line) {
+			if opts.PackRole == "manifest" {
+				if strings.HasPrefix(line, "#table") {
+					decl, err := parseTableLine(line, ln)
+					if err != nil {
+						return nil, err
+					}
+					doc.Meta.Tables = append(doc.Meta.Tables, decl)
+				} else if strings.HasPrefix(line, "#fk") {
+					fk, err := parseFKLine(line, ln)
+					if err != nil {
+						return nil, err
+					}
+					doc.Meta.FKs = append(doc.Meta.FKs, fk)
+				}
+			} else {
+				res.warn(ErrPackKeyOnPlain, ln, "pack-only meta line on plain/row file")
+			}
 			lastWasSQL = false
 			idx++
 			continue
@@ -189,6 +220,7 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 			rest := line[2:]
 			colon := strings.IndexByte(rest, ':')
 			if colon < 0 {
+				doc.Meta.Unknown = append(doc.Meta.Unknown, UnknownMetaLine{Text: line, Line: ln})
 				idx++
 				continue
 			}
@@ -207,18 +239,17 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 			}
 			doc.Meta.Aggregations = append(doc.Meta.Aggregations, Aggregation{Name: name, Values: vals, Line: ln})
 			lastWasSQL = false
-		case strings.HasPrefix(line, "#csvw"):
-			payload := strings.TrimSpace(strings.TrimPrefix(line, "#csvw"))
-			doc.Meta.CSVW = &payload
-			lastWasSQL = false
 		case strings.HasPrefix(line, "#$"):
 			stmt, err := parseSQLLine(line, ln)
 			if err != nil {
 				return nil, err
 			}
 			doc.Meta.SQL = append(doc.Meta.SQL, *stmt)
+			collectSQLWarnings(res, *stmt)
 			lastWasSQL = true
+			lastSQLPayload = stmt.Payload
 		default:
+			doc.Meta.Unknown = append(doc.Meta.Unknown, UnknownMetaLine{Text: line, Line: ln})
 			lastWasSQL = false
 		}
 		idx++
@@ -239,7 +270,7 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 			}
 			return nil, fail(ErrReferenceOnInline, 1, "inline document must not set reference=")
 		}
-		return finishSidecarMeta(doc, opts)
+		return finishSidecarMeta(res, opts)
 	}
 	if hasInlineData && ref == "" {
 		doc.Source.Profile = ProfileInline
@@ -252,31 +283,21 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 	}
 
 	schemaCols := 0
-	if !doc.Header.HeaderRow {
-		schemaCols = columnCountFromSchema(doc.Meta.Columns)
-	}
 	ds, _, colCount, _, err := buildDataSection(parseRecords, full, d, doc.Header.HeaderRow, doc.Header.Fields["quote"], schemaCols, idx, true)
 	if err != nil {
 		return nil, err
 	}
 	doc.Data = ds
 
-	if err := validateColumns(doc, colCount); err != nil {
+	if err := validateColumns(res, colCount); err != nil {
 		return nil, err
 	}
-	if err := validateDocAggregationArity(doc, colCount); err != nil {
-		return nil, err
-	}
-
-	if hasInlineData && doc.Header.Rows != nil && len(doc.Data.Rows) != *doc.Header.Rows {
-		return nil, fail(ErrHeaderInvalidValue, 1, "rows= does not match data row count")
-	}
+	collectMetaWarnings(res)
+	applyRowsMismatchWarning(res)
 
 	if doc.Header.Checksum != nil && len(dataRecords) > 0 {
 		dataSection := extractDataSection(full, records, idx)
-		if err := verifyChecksum(dataSection, doc.Header.Checksum); err != nil {
-			return nil, err
-		}
+		applyChecksumWarning(res, dataSection, false)
 	}
 
 	if !hasInlineData && ref == "" {
@@ -286,7 +307,7 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 		}
 	}
 	_ = metaStart
-	return &ParseResult{Doc: doc}, nil
+	return res, nil
 }
 
 func extractDataSection(full string, records []record, dataIdx int) string {
@@ -312,6 +333,37 @@ func extractDataSection(full string, records []record, dataIdx int) string {
 		}
 	}
 	return full[start:end]
+}
+
+func parseTableLine(line string, lineNo int) (TableDecl, error) {
+	attrs, err := parseKVLine(strings.TrimSpace(strings.TrimPrefix(line, "#table")), lineNo)
+	if err != nil {
+		return TableDecl{}, err
+	}
+	decl := TableDecl{Name: attrs["name"], Dir: attrs["dir"], Attrs: attrs, Line: lineNo}
+	if v := attrs["columns"]; v != "" {
+		n, err := parseIntField(v)
+		if err != nil {
+			return TableDecl{}, fail(ErrHeaderInvalidValue, lineNo, "invalid columns="+v)
+		}
+		decl.Columns = n
+	}
+	if v := attrs["original-size"]; v != "" {
+		n, err := parseInt64Field(v)
+		if err != nil {
+			return TableDecl{}, fail(ErrHeaderInvalidValue, lineNo, "invalid original-size="+v)
+		}
+		decl.OriginalSize = n
+	}
+	return decl, nil
+}
+
+func parseFKLine(line string, lineNo int) (ForeignKey, error) {
+	attrs, err := parseKVLine(strings.TrimSpace(strings.TrimPrefix(line, "#fk")), lineNo)
+	if err != nil {
+		return ForeignKey{}, err
+	}
+	return ForeignKey{From: attrs["from"], To: attrs["to"], Line: lineNo}, nil
 }
 
 func wrapLineErr(err error, line int) error {
@@ -370,7 +422,8 @@ func effectiveColumnCount(doc *Document, headerWidth int) int {
 	return headerWidth
 }
 
-func validateColumns(doc *Document, headerWidth int) error {
+func validateColumns(res *ParseResult, headerWidth int) error {
+	doc := res.Doc
 	for i, col := range doc.Meta.Columns {
 		if doc.Header.HeaderRow {
 			name, hasName := col.Attrs["name"]
@@ -381,10 +434,10 @@ func validateColumns(doc *Document, headerWidth int) error {
 			if headerWidth > 0 && len(doc.Data.HeaderRow) > i {
 				cell := doc.Data.HeaderRow[i]
 				if hasTitle && cell != title {
-					return fail(ErrColumnTitleHeaderMismatch, col.Line, "title does not match header row")
+					res.warn(ErrColumnTitleHeaderMismatch, col.Line, "title does not match header row")
 				}
 				if !hasTitle && cell != name {
-					return fail(ErrColumnNameHeaderMismatch, col.Line, "name does not match header row")
+					res.warn(ErrColumnNameHeaderMismatch, col.Line, "name does not match header row")
 				}
 			}
 		} else if _, ok := col.Attrs["index"]; !ok {

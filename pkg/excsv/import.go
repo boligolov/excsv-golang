@@ -1,34 +1,49 @@
 package excsv
 
 import (
+	"fmt"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
 type ImportOptions struct {
 	// DelimName / QuoteName describe the output ExCSV header (and inline data encoding).
 	// Input bytes are always parsed using detected dialect (sniff + SourcePath hint).
-	DelimName  string
-	QuoteName  string
-	NoHeader   bool
-	AddColumns bool
-	Checksum   bool
+	DelimName string
+	QuoteName string
+	NoHeader  bool
+	Encoding  string
+	Null      string
+	// NoChecksum opts out of checksum=, which is emitted by default.
+	NoChecksum bool
 	Strict     bool
 	Sidecar    bool
 	Reference  string // sidecar reference= path; default basename of SourcePath
 	FileMeta   []KV
 	SourcePath string
+
+	// Enrichment. These are authorial choices, so nothing here is emitted
+	// unless the caller asks for it.
+	Aggregations []string
+	Comments     []string
+	SQL          []KV
+	ColumnAttrs  []ColumnAttr
+}
+
+// ColumnAttr is one --column-attr COL.ATTR=VAL request.
+type ColumnAttr struct {
+	Column string
+	Attr   string
+	Value  string
 }
 
 type ImportResult struct {
 	Doc      *Document
 	Warnings []Issue
 }
-
-var columnNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 
 func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 	data = stripUTF8BOM(data)
@@ -114,16 +129,25 @@ func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 		}
 	}
 
-	fields := map[string]string{
-		"version": "0.2",
-		"delim":   outputDelimName,
-		"rows":    strconv.Itoa(len(dataRows)),
+	if outputQuoteName == "" {
+		outputQuoteName = "none"
 	}
-	if outputQuoteName != "" && outputQuoteName != "none" {
-		fields["quote"] = outputQuoteName
+	// delim= and quote= are both always declared, quote=none included: the
+	// reader should never have to recall a default to parse the data section.
+	fields := map[string]string{
+		"version": CurrentVersion,
+		"delim":   outputDelimName,
+		"quote":   outputQuoteName,
+		"rows":    strconv.Itoa(len(dataRows)),
 	}
 	if !hasHeader {
 		fields["header"] = "0"
+	}
+	if enc := strings.TrimSpace(opts.Encoding); enc != "" {
+		if !strings.EqualFold(enc, "UTF-8") && !strings.EqualFold(enc, "UTF8") {
+			return nil, fail(ErrEncodingUnsupported, 1, "convert writes UTF-8 only, got encoding="+enc)
+		}
+		fields["encoding"] = "UTF-8"
 	}
 
 	doc := &Document{
@@ -131,7 +155,7 @@ func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 		Header: Header{
 			Fields:       fields,
 			HasMagicLine: true,
-			Version:      "0.2",
+			Version:      CurrentVersion,
 		},
 		Data: DataSection{
 			HasHeaderRow: hasHeader,
@@ -143,20 +167,54 @@ func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 		return nil, err
 	}
 
-	for _, kv := range opts.FileMeta {
-		doc.Meta.FileMeta = upsertKV(doc.Meta.FileMeta, kv.Key, kv.Value)
+	if opts.Null != "" {
+		if err := doc.convertNull(opts.Null); err != nil {
+			return nil, err
+		}
 	}
 
-	if opts.AddColumns && hasHeader {
-		for _, name := range headerRow {
-			if !columnNameRE.MatchString(name) {
-				return nil, fail(ErrColumnMalformedAttribute, lineNums[0], "invalid column name "+name)
-			}
-			doc.Meta.Columns = append(doc.Meta.Columns, ColumnDef{
-				Attrs: map[string]string{"name": name, "type": "text"},
-				Line:  lineNums[0],
-			})
+	doc.SetFileMeta("created", importClock().UTC().Format(time.RFC3339))
+	if opts.SourcePath != "" {
+		doc.SetFileMeta("source", filepath.Base(opts.SourcePath))
+	}
+	doc.SetFileMeta("tool", "excsv-cli")
+	for _, kv := range opts.FileMeta {
+		doc.SetFileMeta(kv.Key, kv.Value)
+	}
+
+	// #column is a fact about the source, so it is always emitted, with a real
+	// inferred type. name= is sanitized to an identifier and title= keeps the
+	// raw header text, so headers like "Total Sales" import instead of failing.
+	doc.InferColumnsFromHeader(headerRow, hasHeader)
+	for _, ca := range opts.ColumnAttrs {
+		if err := doc.UpsertColumn(ca.Column, map[string]string{ca.Attr: ca.Value}); err != nil {
+			return nil, err
 		}
+	}
+
+	// Promote quoting before anything derived is computed: converting to a
+	// delimiter that occurs inside a value would otherwise emit a corrupt file.
+	if !doc.Header.QuoteEnabled && cellsContainRune(doc, doc.Header.Delim) {
+		doc.Header.Fields["quote"] = "double"
+		if err := applyHeaderDefaults(&doc.Header); err != nil {
+			return nil, err
+		}
+		warnings = append(warnings, newIssue(ErrQuoteNoneDelimiterInValue, 1,
+			"promoted quote=none to quote=double because a value contains the delimiter"))
+	}
+
+	for _, name := range opts.Aggregations {
+		if _, err := doc.AddAggregation(name); err != nil {
+			return nil, err
+		}
+	}
+	for _, kv := range opts.SQL {
+		if err := doc.SetSQL(kv.Key, kv.Value); err != nil {
+			return nil, err
+		}
+	}
+	for _, text := range opts.Comments {
+		doc.AddHumanComment(text)
 	}
 
 	if opts.Sidecar {
@@ -168,21 +226,74 @@ func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 		doc.Source.Reference = ref
 		doc.Source.SidecarPath = opts.SourcePath
 		doc.Header.Fields["reference"] = ref
-		doc.Data = DataSection{}
-		if opts.Checksum {
+		// The data section is cleared last: aggregations, columns and the
+		// checksum are all derived from it.
+		if !opts.NoChecksum {
 			records := splitRecords(data)
 			section := extractDataSection(string(data), records, 0)
 			if err := doc.SetDataChecksumFromSection(section, "sha256"); err != nil {
 				return nil, err
 			}
 		}
-	} else if opts.Checksum {
+		doc.Data = DataSection{}
+	} else if !opts.NoChecksum {
 		if err := doc.SetDataChecksum("sha256"); err != nil {
 			return nil, err
 		}
 	}
 
 	return &ImportResult{Doc: doc, Warnings: warnings}, nil
+}
+
+// importClock is swappable so tests can pin #@created.
+var importClock = time.Now
+
+// ParseColumnAttr splits a --column-attr COL.ATTR=VAL request. "." is a safe
+// separator because sanitized column names never contain one.
+func ParseColumnAttr(spec string) (ColumnAttr, error) {
+	lhs, value, ok := strings.Cut(spec, "=")
+	if !ok {
+		return ColumnAttr{}, fmt.Errorf("invalid --column-attr %q (expected COLUMN.ATTR=VALUE)", spec)
+	}
+	col, attr, ok := strings.Cut(strings.TrimSpace(lhs), ".")
+	if !ok || col == "" || attr == "" {
+		return ColumnAttr{}, fmt.Errorf("invalid --column-attr %q (expected COLUMN.ATTR=VALUE)", spec)
+	}
+	return ColumnAttr{Column: col, Attr: attr, Value: strings.TrimSpace(value)}, nil
+}
+
+// ExpandAggregationList resolves the --agg list, including the "default" and
+// "all" shorthands.
+func ExpandAggregationList(list string) []string {
+	list = strings.TrimSpace(list)
+	if list == "" {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	for _, part := range strings.Split(list, ",") {
+		switch part = strings.TrimSpace(part); part {
+		case "":
+		case "default":
+			for _, name := range DefaultAggregations {
+				add(name)
+			}
+		case "all":
+			for _, name := range AllAggregations {
+				add(name)
+			}
+		default:
+			add(part)
+		}
+	}
+	return out
 }
 
 var sniffDelims = []struct {
@@ -323,7 +434,7 @@ func sniffQuote(line string, delim rune) string {
 func minimalImportDoc() (*ImportResult, error) {
 	doc := &Document{
 		Form:   FormPlain,
-		Header: Header{Fields: map[string]string{"version": "0.2"}, HasMagicLine: true, Version: "0.2"},
+		Header: Header{Fields: map[string]string{"version": CurrentVersion}, HasMagicLine: true, Version: CurrentVersion},
 	}
 	if err := applyHeaderDefaults(&doc.Header); err != nil {
 		return nil, err

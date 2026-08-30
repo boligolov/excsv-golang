@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/boligolov/excsv-golang/pkg/excsv"
 	"github.com/spf13/cobra"
 )
 
@@ -26,9 +27,12 @@ func argLooksLikeFile(arg string) bool {
 }
 
 func isRowZipPath(path string) bool {
+	if excsv.IsPackPath(path) {
+		return false
+	}
 	ext := strings.ToLower(filepath.Ext(path))
 	base := strings.ToLower(strings.TrimSuffix(filepath.Base(path), ext))
-	return ext == ".zip" && (strings.HasSuffix(base, ".excsv") || strings.HasSuffix(base, ".ecsv"))
+	return ext == ".zip" && (strings.HasSuffix(base, ".excsv") || strings.HasSuffix(base, ".ecsv") || strings.HasSuffix(base, ".extsv"))
 }
 
 // Execute runs the CLI. When the first positional argument looks like a file path,

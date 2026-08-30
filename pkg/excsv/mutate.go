@@ -99,6 +99,27 @@ func (doc *Document) UpdateAggregation(name string) error {
 	return nil
 }
 
+// AddHumanComment appends a ## human comment line (adds ## prefix when missing).
+func (doc *Document) AddHumanComment(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	if !strings.HasPrefix(text, "##") {
+		text = "## " + text
+	}
+	doc.Meta.HumanComments = append(doc.Meta.HumanComments, text)
+}
+
+// RemoveHumanComment removes the ## comment at index. Returns false if out of range.
+func (doc *Document) RemoveHumanComment(index int) bool {
+	if index < 0 || index >= len(doc.Meta.HumanComments) {
+		return false
+	}
+	doc.Meta.HumanComments = append(doc.Meta.HumanComments[:index], doc.Meta.HumanComments[index+1:]...)
+	return true
+}
+
 // RemoveAggregation removes a #% line. Returns false if not found.
 func (doc *Document) RemoveAggregation(name string) bool {
 	var out []Aggregation

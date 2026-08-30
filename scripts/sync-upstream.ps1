@@ -19,39 +19,61 @@ Set-Location -LiteralPath $RepoRoot
 $UpstreamBase = 'https://raw.githubusercontent.com/boligolov/excsv/master'
 $FixtureBase = "$UpstreamBase/fixtures"
 
-# Normative LLM spec: root hub + per-topic files under docs/llm/ (upstream split).
-$LlmTopicFiles = @(
-    'README.md',
+$GuideFiles = @(
     'aggregations.md',
-    'canonical-example.md',
     'checksum.md',
     'columns.md',
-    'csvw.md',
+    'data-section.md',
+    'file-metadata.md',
+    'file-structure.md',
+    'full-example.md',
+    'header.md',
+    'introduction.md',
+    'json.md',
+    'license.md',
+    'meta-lines.md',
+    'pack.md',
+    'prior-art.md',
+    'sql.md',
+    'zip.md'
+)
+
+$ImplementationFiles = @(
+    'README.md',
+    'aggregations.md',
+    'checksum.md',
+    'columns.md',
     'data-section.md',
     'error-handling.md',
     'file-metadata.md',
     'file-structure.md',
+    'full-example.md',
     'header.md',
-    'identity.md',
+    'introduction.md',
+    'json.md',
     'license.md',
     'meta-lines.md',
-    'parsing.md',
-    'quick-reference.md',
-    'reserved.md',
-    'serialization.md',
+    'pack.md',
+    'prior-art.md',
     'sql.md',
     'zip.md'
 )
 
 $SpecDownloads = @(
-    @{ url = "$UpstreamBase/README-LLM.md"; out = 'docs/downloaded/README-LLM.md' },
+    @{ url = "$UpstreamBase/README.md"; out = 'docs/downloaded/README.md' },
+    @{ url = "$UpstreamBase/docs/README.md"; out = 'docs/downloaded/guide/README.md' },
     @{ url = "$UpstreamBase/plan/README.md"; out = 'docs/downloaded/plan-README.md' },
     @{ url = "$UpstreamBase/plan/01-features.md"; out = 'docs/downloaded/plan-01-features.md' },
     @{ url = "$UpstreamBase/plan/02-fixtures.md"; out = 'docs/downloaded/plan-02-fixtures.md' },
-    @{ url = "$FixtureBase/fixtures.yaml"; out = 'test/fixtures/fixtures.yaml' }
+    @{ url = "$FixtureBase/fixtures.yaml"; out = 'test/fixtures/fixtures.yaml' },
+    @{ url = "$UpstreamBase/schema/excsv.schema.json"; out = 'docs/downloaded/schema/excsv.schema.json' },
+    @{ url = "$UpstreamBase/schema/example.excsv.json"; out = 'docs/downloaded/schema/example.excsv.json' }
 )
-foreach ($name in $LlmTopicFiles) {
-    $SpecDownloads += @{ url = "$UpstreamBase/docs/llm/$name"; out = "docs/downloaded/llm/$name" }
+foreach ($name in $GuideFiles) {
+    $SpecDownloads += @{ url = "$UpstreamBase/docs/$name"; out = "docs/downloaded/guide/$name" }
+}
+foreach ($name in $ImplementationFiles) {
+    $SpecDownloads += @{ url = "$UpstreamBase/docs/implementation/$name"; out = "docs/downloaded/implementation/$name" }
 }
 
 function Get-ManifestPaths {
@@ -83,7 +105,7 @@ $syncFixtures = -not $SpecsOnly
 
 if ($syncSpecs) {
     Write-Host 'Downloading spec/plan snapshots...'
-    New-Item -ItemType Directory -Force -Path docs/downloaded, docs/downloaded/llm, test/fixtures | Out-Null
+    New-Item -ItemType Directory -Force -Path docs/downloaded, docs/downloaded/guide, docs/downloaded/implementation, docs/downloaded/schema, test/fixtures | Out-Null
     foreach ($item in $SpecDownloads) {
         Save-RemoteFile -Url $item.url -OutPath $item.out
     }
@@ -108,9 +130,37 @@ if ($syncFixtures) {
             Write-Warning "Skipping unexpected path: $rel"
             continue
         }
+        if ($rel -like 'pack/*') {
+            continue
+        }
+        if ($rel -like 'zip/*') {
+            continue
+        }
         $out = Join-Path 'test/fixtures' $rel
-        Save-RemoteFile -Url "$FixtureBase/$rel" -OutPath $out
+        try {
+            Save-RemoteFile -Url "$FixtureBase/$rel" -OutPath $out
+        }
+        catch {
+            Write-Warning "Skip $rel : $_"
+        }
     }
+
+    Write-Host 'Generating zip fixtures from upstream generator...'
+    $specDir = Join-Path $env:TEMP 'excsv-spec-sync'
+    if (-not (Test-Path (Join-Path $specDir '.git'))) {
+        if (Test-Path $specDir) { Remove-Item -Recurse -Force $specDir }
+        git clone --depth 1 https://github.com/boligolov/excsv.git $specDir
+    }
+    python (Join-Path $specDir 'fixtures\generate\make_zip_fixtures.py')
+    python (Join-Path $specDir 'fixtures\generate\make_pack_fixtures.py')
+    $zipSrc = Join-Path $specDir 'fixtures\zip'
+    $zipDst = Join-Path $RepoRoot 'test\fixtures\zip'
+    if (Test-Path $zipDst) { Remove-Item -Recurse -Force $zipDst }
+    Copy-Item -Recurse $zipSrc $zipDst
+    $packSrc = Join-Path $specDir 'fixtures\pack'
+    $packDst = Join-Path $RepoRoot 'test\fixtures\pack'
+    if (Test-Path $packDst) { Remove-Item -Recurse -Force $packDst }
+    Copy-Item -Recurse $packSrc $packDst
 }
 
 Write-Host 'Done.'

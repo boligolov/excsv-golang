@@ -98,6 +98,10 @@ func JoinCSVFields(fields []string, d Dialect) string {
 	return joinCSVFields(fields, d)
 }
 
+func SplitCSVFields(line string, d Dialect) ([]string, error) {
+	return splitCSVFields(line, d)
+}
+
 func quoteField(s string, delim, quote rune) string {
 	q := string(quote)
 	d := string(delim)

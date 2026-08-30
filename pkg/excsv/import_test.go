@@ -13,7 +13,7 @@ func TestImportDelimited_MinimalCSV(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := res.Doc
-	if doc.Header.Version != "0.2" {
+	if doc.Header.Version != "0.4" {
 		t.Fatalf("version=%q", doc.Header.Version)
 	}
 	if doc.Header.DelimName != "comma" {
@@ -83,8 +83,7 @@ func TestImportDelimited_NoHeader(t *testing.T) {
 
 func TestImportDelimited_Columns(t *testing.T) {
 	res, err := excsv.ImportDelimited([]byte("id,name\n1,alice\n"), excsv.ImportOptions{
-		Strict:     true,
-		AddColumns: true,
+		Strict: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -101,18 +100,26 @@ func TestImportDelimited_Columns(t *testing.T) {
 	}
 }
 
-func TestImportDelimited_InvalidColumnName(t *testing.T) {
-	_, err := excsv.ImportDelimited([]byte("bad name,x\n1,2\n"), excsv.ImportOptions{
-		Strict:     true,
-		AddColumns: true,
+func TestImportDelimited_SanitizedColumnName(t *testing.T) {
+	res, err := excsv.ImportDelimited([]byte("Total Sales,x\n1,2\n"), excsv.ImportOptions{
+		Strict: true,
 	})
-	if err == nil {
-		t.Fatal("expected error for invalid column name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Doc.Meta.Columns) != 2 {
+		t.Fatalf("columns=%d", len(res.Doc.Meta.Columns))
+	}
+	if res.Doc.Meta.Columns[0].Attrs["name"] != "Total_Sales" {
+		t.Fatalf("name=%q", res.Doc.Meta.Columns[0].Attrs["name"])
+	}
+	if res.Doc.Meta.Columns[0].Attrs["title"] != "Total Sales" {
+		t.Fatalf("title=%q", res.Doc.Meta.Columns[0].Attrs["title"])
 	}
 }
 
 func TestImportDelimited_Checksum(t *testing.T) {
-	res, err := excsv.ImportDelimited([]byte("a,b\n1,2\n"), excsv.ImportOptions{Strict: true, Checksum: true})
+	res, err := excsv.ImportDelimited([]byte("a,b\n1,2\n"), excsv.ImportOptions{Strict: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +167,7 @@ func TestImportDelimited_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(string(out)) != "#!excsv version=0.2" {
+	if strings.TrimSpace(string(out)) != "#!excsv version=0.4 delim=comma quote=none" {
 		t.Fatalf("got %q", string(out))
 	}
 }

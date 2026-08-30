@@ -55,9 +55,8 @@ func applyHeaderDefaults(h *Header) error {
 	}
 	if !h.HasMagicLine {
 		h.DelimName = "comma"
-		h.QuoteName = "none"
+		h.QuoteName = "double"
 		h.Encoding = "UTF-8"
-		h.Schema = "excsv"
 		h.HeaderRow = true
 	} else {
 		if v, ok := h.Fields["delim"]; ok {
@@ -77,11 +76,6 @@ func applyHeaderDefaults(h *Header) error {
 			h.Encoding = v
 		} else {
 			h.Encoding = "UTF-8"
-		}
-		if v, ok := h.Fields["schema"]; ok {
-			h.Schema = v
-		} else {
-			h.Schema = "excsv"
 		}
 		if v, ok := h.Fields["header"]; ok {
 			if v != "0" && v != "1" {
@@ -130,13 +124,6 @@ func applyHeaderDefaults(h *Header) error {
 			}
 			h.Rows = &n
 		}
-		if cs, ok := h.Fields["checksum"]; ok {
-			alg, hex, err := parseChecksumField(cs)
-			if err != nil {
-				return fail(ErrHeaderInvalidValue, 1, err.Error())
-			}
-			h.Checksum = &Checksum{Algorithm: alg, Hex: hex}
-		}
 		if os, ok := h.Fields["original-size"]; ok && strings.TrimSpace(os) != "" {
 			n, err := parseInt64Field(os)
 			if err != nil {
@@ -147,6 +134,34 @@ func applyHeaderDefaults(h *Header) error {
 	}
 
 	return nil
+}
+
+func classifyChecksumField(s string) (*Checksum, ErrorKind) {
+	alg, hex, err := parseChecksumField(s)
+	if err != nil {
+		return nil, ErrChecksumMalformed
+	}
+	switch alg {
+	case "sha256":
+		if len(hex) != 64 || !isLowerHex(hex) {
+			return nil, ErrChecksumMalformed
+		}
+		return &Checksum{Algorithm: alg, Hex: hex}, ""
+	default:
+		return nil, ErrChecksumUnknownAlgorithm
+	}
+}
+
+func isLowerHex(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func parseIntField(s string) (int, error) {

@@ -41,14 +41,41 @@ func resolveReferencePath(sidecarPath, ref string) (string, error) {
 	if ref == "" {
 		return "", fail(ErrSidecarMissingReference, 1, "missing reference=")
 	}
-	if filepath.IsAbs(ref) {
-		return "", fail(ErrHeaderInvalidValue, 1, "reference= must be relative")
+	slash := filepath.ToSlash(ref)
+	if filepath.IsAbs(ref) || filepath.IsAbs(slash) || looksAbsWindows(slash) {
+		return "", fail(ErrSidecarReferenceEscapes, 1, "reference= must be relative")
+	}
+	if hasPathDotDot(slash) {
+		return "", fail(ErrSidecarReferenceEscapes, 1, "reference= escapes sidecar directory")
 	}
 	dir := filepath.Dir(sidecarPath)
 	if dir == "." {
 		dir = ""
 	}
-	return filepath.Join(dir, ref), nil
+	joined := filepath.Join(dir, filepath.FromSlash(ref))
+	if dir != "" {
+		rel, err := filepath.Rel(dir, joined)
+		if err != nil || hasPathDotDot(filepath.ToSlash(rel)) {
+			return "", fail(ErrSidecarReferenceEscapes, 1, "reference= escapes sidecar directory")
+		}
+	}
+	return joined, nil
+}
+
+func looksAbsWindows(p string) bool {
+	if len(p) >= 2 && p[1] == ':' {
+		return true
+	}
+	return strings.HasPrefix(p, "//") || strings.HasPrefix(p, "\\\\")
+}
+
+func hasPathDotDot(slashPath string) bool {
+	for _, part := range strings.Split(slashPath, "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func parseDelimitedData(data []byte, h Header) (*DataSection, string, error) {
@@ -62,7 +89,8 @@ func parseDelimitedData(data []byte, h Header) (*DataSection, string, error) {
 	return &ds, section, nil
 }
 
-func attachReferencedData(doc *Document, dataPath string, data []byte, opts ParseOptions) (*ParseResult, error) {
+func attachReferencedData(res *ParseResult, dataPath string, data []byte, opts ParseOptions) (*ParseResult, error) {
+	doc := res.Doc
 	refHeader := headerForDataPath(doc.Header, dataPath)
 	ds, dataSection, err := parseDelimitedData(data, refHeader)
 	if err != nil {
@@ -76,40 +104,24 @@ func attachReferencedData(doc *Document, dataPath string, data []byte, opts Pars
 	if !doc.Data.HasHeaderRow {
 		colCount = columnCountFromSchema(doc.Meta.Columns)
 	}
-	if err := validateSidecarSchema(doc, colCount); err != nil {
+	if err := validateColumns(res, colCount); err != nil {
 		return nil, err
 	}
-
-	warnings := sidecarDelimWarnings(doc.Source.SidecarPath, doc.Header)
-
-	if doc.Header.Rows != nil && doc.RowCount() != *doc.Header.Rows {
-		return nil, fail(ErrHeaderInvalidValue, 1, "rows= does not match data row count")
-	}
-
-	if doc.Header.Checksum != nil {
-		if err := verifyChecksum(dataSection, doc.Header.Checksum); err != nil {
-			if pe, ok := err.(*ParseError); ok {
-				pe.Issue.Kind = ErrSidecarChecksumMismatch
-			}
-			return nil, err
-		}
-	}
-
-	return &ParseResult{Doc: doc, Warnings: warnings}, nil
+	collectMetaWarnings(res)
+	appendExtsvWarning(res, doc.Source.SidecarPath)
+	applyRowsMismatchWarning(res)
+	applyChecksumWarning(res, dataSection, true)
+	return res, nil
 }
 
-func finishSidecarMeta(doc *Document, opts ParseOptions) (*ParseResult, error) {
+func finishSidecarMeta(res *ParseResult, opts ParseOptions) (*ParseResult, error) {
+	doc := res.Doc
 	ref := headerReference(doc.Header)
 	doc.Source.Reference = ref
 	doc.Source.SidecarPath = opts.SourcePath
 	doc.Source.Profile = ProfileSidecar
 
-	colCount := columnCountFromSchema(doc.Meta.Columns)
-	if err := validateSidecarSchema(doc, colCount); err != nil {
-		return nil, err
-	}
-
-	warnings := sidecarDelimWarnings(opts.SourcePath, doc.Header)
+	appendExtsvWarning(res, opts.SourcePath)
 
 	if opts.ExpectProfile == "sidecar" || opts.ExpectProfile == "sidecar_strict" {
 		if ref == "" {
@@ -118,10 +130,8 @@ func finishSidecarMeta(doc *Document, opts ParseOptions) (*ParseResult, error) {
 	}
 
 	if !opts.ResolveReference {
-		if ref == "" && doc.Header.Rows != nil && *doc.Header.Rows != 0 {
-			return nil, fail(ErrHeaderInvalidValue, 1, "rows= does not match data row count")
-		}
-		return &ParseResult{Doc: doc, Warnings: warnings}, nil
+		collectMetaWarnings(res)
+		return res, nil
 	}
 
 	dataPath, err := resolveReferencePath(opts.SourcePath, ref)
@@ -131,15 +141,13 @@ func finishSidecarMeta(doc *Document, opts ParseOptions) (*ParseResult, error) {
 	data, err := os.ReadFile(dataPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			if opts.ExpectProfile == "sidecar_strict" || opts.Strict {
-				return nil, fail(ErrSidecarReferenceNotFound, 1, "referenced file not found: "+ref)
-			}
-			warnings = append(warnings, newIssue(ErrSidecarReferenceNotFound, 1, "referenced file not found: "+ref))
-			return &ParseResult{Doc: doc, Warnings: warnings}, nil
+			res.warn(ErrSidecarReferenceNotFound, 1, "referenced file not found: "+ref)
+			collectMetaWarnings(res)
+			return res, nil
 		}
 		return nil, err
 	}
-	return attachReferencedData(doc, dataPath, data, opts)
+	return attachReferencedData(res, dataPath, data, opts)
 }
 
 func discoverSidecarForData(dataPath string) (string, []byte, bool, error) {

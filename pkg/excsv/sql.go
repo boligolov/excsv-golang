@@ -13,16 +13,39 @@ var dialectAliases = map[string]string{
 	"sqlserver":  "mssql",
 }
 
+var wellKnownDialects = []string{
+	"clickhouse", "postgresql", "snowflake", "sqlserver", "bigquery",
+	"mariadb", "postgres", "sqlite", "oracle", "mysql", "mssql",
+	"duckdb", "ansi", "db2", "pg",
+}
+
 func parseSQLKey(raw string) (verb, dialect, version string, qualified bool) {
-	parts := strings.Split(raw, "-")
-	verb = parts[0]
-	if len(parts) == 1 {
-		return verb, "", "", false
+	dash := strings.IndexByte(raw, '-')
+	if dash < 0 {
+		return raw, "", "", false
 	}
-	if len(parts) == 2 {
-		return verb, normalizeDialect(parts[1]), "", true
+	verb = raw[:dash]
+	suffix := strings.ToLower(raw[dash+1:])
+	dialect, version = splitDialectVersion(suffix)
+	return verb, dialect, version, true
+}
+
+func splitDialectVersion(suffix string) (dialect, version string) {
+	best := ""
+	for _, d := range wellKnownDialects {
+		if suffix == d || strings.HasPrefix(suffix, d+"-") {
+			if len(d) > len(best) {
+				best = d
+			}
+		}
 	}
-	return verb, normalizeDialect(parts[0]), strings.Join(parts[1:], "-"), true
+	if best == "" {
+		return suffix, ""
+	}
+	if suffix == best {
+		return normalizeDialect(best), ""
+	}
+	return normalizeDialect(best), suffix[len(best)+1:]
 }
 
 func normalizeDialect(d string) string {
@@ -31,6 +54,22 @@ func normalizeDialect(d string) string {
 		return a
 	}
 	return d
+}
+
+func isKnownDialect(d string) bool {
+	if d == "" {
+		return true
+	}
+	d = strings.ToLower(d)
+	if _, ok := dialectAliases[d]; ok {
+		return true
+	}
+	for _, k := range wellKnownDialects {
+		if d == k || d == normalizeDialect(k) {
+			return true
+		}
+	}
+	return false
 }
 
 func effectiveDialect(stmt SQLStatement, headerSQLDialect string) string {
@@ -44,6 +83,21 @@ func effectiveDialect(stmt SQLStatement, headerSQLDialect string) string {
 		return headerSQLDialect
 	}
 	return "ansi"
+}
+
+func sqlPayloadUnclosed(payload string) bool {
+	n := 0
+	for _, c := range payload {
+		switch c {
+		case '(':
+			n++
+		case ')':
+			if n > 0 {
+				n--
+			}
+		}
+	}
+	return n > 0
 }
 
 func parseSQLLine(line string, lineNo int) (*SQLStatement, error) {
@@ -64,9 +118,6 @@ func parseSQLLine(line string, lineNo int) (*SQLStatement, error) {
 		return nil, fail(ErrSQLEmbeddedNewline, lineNo, "embedded newline in SQL payload")
 	}
 	verb, dialect, version, qualified := parseSQLKey(rawKey)
-	if !knownSQLVerbs[verb] {
-		return nil, fail(ErrSQLUnknownVerb, lineNo, "unknown SQL verb: "+verb)
-	}
 	return &SQLStatement{
 		Verb:      verb,
 		Dialect:   dialect,

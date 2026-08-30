@@ -104,24 +104,48 @@ func splitHeaderPairs(s string) ([]string, error) {
 			pairs = append(pairs, segment)
 			continue
 		}
+		for i < len(s) && s[i] != ' ' && s[i] != '=' {
+			i++
+		}
+		if i >= len(s) || s[i] != '=' {
+			pairs = append(pairs, s[start:i])
+			continue
+		}
+		key := s[start:i]
+		i++ // past '='
+
+		// key="value with spaces" is the spec's own form for values containing
+		// spaces, with "" escaping an embedded quote.
+		if i < len(s) && s[i] == '"' {
+			i++
+			var b strings.Builder
+			closed := false
+			for i < len(s) {
+				if s[i] == '"' {
+					if i+1 < len(s) && s[i+1] == '"' {
+						b.WriteByte('"')
+						i += 2
+						continue
+					}
+					i++
+					closed = true
+					break
+				}
+				b.WriteByte(s[i])
+				i++
+			}
+			if !closed {
+				return nil, fail(ErrHeaderUnclosedQuote, 1, "unclosed quote in header")
+			}
+			pairs = append(pairs, key+"="+b.String())
+			continue
+		}
+
+		valStart := i
 		for i < len(s) && s[i] != ' ' {
 			i++
 		}
-		token := s[start:i]
-		if strings.Contains(token, " ") {
-			return nil, fail(ErrHeaderMalformedKV, 1, "unquoted value contains spaces")
-		}
-		if eq := strings.IndexByte(token, '='); eq >= 0 {
-			val := token[eq+1:]
-			if strings.HasPrefix(val, `"`) && !strings.HasSuffix(val, `"`) {
-				return nil, fail(ErrHeaderUnclosedQuote, 1, "unclosed quote in header")
-			}
-			if strings.HasPrefix(val, `"`) && strings.HasSuffix(val, `"`) && len(val) >= 2 {
-				// strip quotes for storage
-				token = token[:eq+1] + val[1:len(val)-1]
-			}
-		}
-		pairs = append(pairs, token)
+		pairs = append(pairs, key+"="+s[valStart:i])
 	}
 	return pairs, nil
 }
@@ -145,7 +169,7 @@ func skipColonValue(line, prefix string) (key, value string, ok bool) {
 
 func isReservedHeaderKey(key string) bool {
 	switch key {
-	case "layout", "mode", "section-size", "table-count":
+	case "layout", "mode", "section-size", "table-count", "single-table":
 		return true
 	}
 	return false
@@ -160,17 +184,5 @@ func validUTF8(data []byte) bool {
 }
 
 func encodingMismatch(data []byte, encoding string) bool {
-	enc := strings.ToUpper(strings.TrimSpace(encoding))
-	if enc == "" || enc == "UTF-8" || enc == "UTF8" {
-		return false
-	}
-	if !utf8.Valid(data) {
-		return false
-	}
-	for _, b := range data {
-		if b > 127 {
-			return true
-		}
-	}
-	return false
+	return encodingIssue(data, encoding) != nil && encodingIssue(data, encoding).Kind == ErrEncodingMismatch
 }
