@@ -74,25 +74,43 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build
+      - name: Build and package
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
+          set -euo pipefail
+
           VERSION="$(bash scripts/version.sh)"
           BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           CLI_PKG="$(go list -f '{{.ImportPath}}' ./internal/cli)"
-          OUT="excsv-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          BIN="excsv${{ matrix.ext }}"
+          ZIP="excsv-${{ matrix.goos }}-${{ matrix.goarch }}.zip"
+
           go build -trimpath \
             -ldflags "-s -w -X ${CLI_PKG}.Version=${VERSION} -X ${CLI_PKG}.BuildTime=${BUILD_TIME}" \
-            -o "$OUT" \
+            -o "$BIN" \
             ./cmd/excsv
+
+          SHA256="$(sha256sum "$BIN" | awk '{print $1}')"
+
+          zip -9 "$ZIP" "$BIN"
+          {
+            printf '%s\n' \
+              'excsv-cli' \
+              'Command-line tool for ExCSV v0.4 (Extended CSV)' \
+              "Version: ${VERSION}" \
+              'https://excsv.org' \
+              "SHA256: ${SHA256}"
+          } > zip-comment.txt
+          zip -z "$ZIP" < zip-comment.txt
+          rm -f "$BIN" zip-comment.txt
 
       - uses: actions/upload-artifact@v4
         with:
           name: excsv-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: excsv-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          path: excsv-${{ matrix.goos }}-${{ matrix.goarch }}.zip
           if-no-files-found: error
 
   release:
@@ -107,13 +125,13 @@ jobs:
       - name: Checksums
         working-directory: dist
         run: |
-          sha256sum excsv-* > SHA256SUMS.txt
+          sha256sum excsv-*.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/excsv-*
+            dist/excsv-*.zip
             dist/SHA256SUMS.txt
           generate_release_notes: true

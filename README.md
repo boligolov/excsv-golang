@@ -1,6 +1,10 @@
 # excsv-golang
 
+**Website:** [excsv.org](https://excsv.org)
+
 Go reference implementation of **excsv-cli** — a command-line tool and library for [ExCSV](https://github.com/boligolov/excsv) v0.4 (Extended CSV).
+
+> **Alpha.** The CLI is pre-1.0 and may change without notice — command names, flags, and exit behaviour are not stable across releases yet. Pin a version in scripts and check release notes before upgrading.
 
 Supports **plain** (`.excsv`, `.ecsv`, `.extsv` sidecars), **JSON** (`.excsv.json`), **row ZIP** (`.excsv.zip`, `.ecsv.zip`), and **pack** (`.excsv.pack.zip`).
 
@@ -158,7 +162,7 @@ GitHub Actions:
 | Workflow | Trigger | Result |
 | --- | --- | --- |
 | **CI** (`.github/workflows/ci.yml`) | push / PR → `main` | test + cross-compile 6 platforms; artifact `excsv-binaries` on push to `main` |
-| **Release** (`.github/workflows/release.yml`) | tag `v*` (e.g. `v0.0.2`) | test + build + [GitHub Release](https://docs.github.com/en/repositories/releasing-projects-on-github) with binaries + `SHA256SUMS.txt` |
+| **Release** (`.github/workflows/release.yml`) | tag `v*` (e.g. `v0.0.2`) | test + build + GitHub Release: `excsv-{os}-{arch}.zip` (contains `excsv` / `excsv.exe` + zip comment banner) + `SHA256SUMS.txt` |
 
 Version stamped into binaries: latest `v*` tag via `git describe`, or `internal/cli/version.go` when untagged.
 
