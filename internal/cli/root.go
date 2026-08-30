@@ -146,23 +146,32 @@ func printWarnings(warnings []excsv.Issue) {
 	}
 }
 
-func printPackInfo(cfg *config, res *excsv.ParseResult) {
+func printPackInfo(cfg *config, res *excsv.ParseResult, noMeta bool) {
 	p := res.Pack
 	names := make([]string, 0, len(p.Tables))
 	for _, t := range p.Tables {
 		names = append(names, t.Decl.Name)
 	}
+	extras := collectInfoExtras(res.Doc, noMeta)
 	if cfg.jsonOut {
-		_ = writeJSON(map[string]any{
+		out := map[string]any{
 			"version": res.Doc.Header.Version,
 			"form":    "pack",
 			"layout":  res.Doc.Header.Fields["layout"],
 			"tables":  names,
 			"fk":      len(p.FKs),
-		})
+		}
+		applyInfoExtrasJSON(out, extras)
+		_ = writeJSON(out)
 		return
 	}
-	fmt.Printf("ExCSV %s  form=pack  tables=%d  [%s]\n", res.Doc.Header.Version, len(p.Tables), strings.Join(names, ", "))
+	fmt.Printf("ExCSV %s\n", res.Doc.Header.Version)
+	fmt.Printf("Form: pack\n")
+	fmt.Printf("Tables: %d (%s)\n", len(p.Tables), strings.Join(names, ", "))
+	if len(p.FKs) > 0 {
+		fmt.Printf("Foreign keys: %d\n", len(p.FKs))
+	}
+	printInfoExtrasText(extras)
 }
 
 func writeJSON(v any) error {

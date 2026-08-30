@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/boligolov/excsv-golang/pkg/excsv"
 	"github.com/spf13/cobra"
@@ -12,48 +14,203 @@ import (
 const largeDocumentRows = 100_000
 
 func newInfoCmd(cfg *config) *cobra.Command {
-	return &cobra.Command{
+	var noMeta bool
+	c := &cobra.Command{
 		Use:   "info",
-		Short: "Compact summary (version, rows, columns, form, profile)",
+		Short: "Document summary and column header views",
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
-			path := targetPath()
-			res, err := loadDoc(cfg, path, false)
-			if err != nil {
-				exitParseErr(err)
-			}
-			printWarnings(res.Warnings)
-			if res.Pack != nil && cfg.table == "" && cfg.packTable == nil {
-				printPackInfo(cfg, res)
-				return
-			}
-			doc := res.Doc
-			if cfg.packTable != nil {
-				doc = cfg.packTable.Document()
-			}
-			if cfg.jsonOut {
-				out := map[string]any{
-					"version": doc.Header.Version, "delim": doc.Header.DelimName,
-					"quote": doc.Header.QuoteName, "rows": doc.DeclaredOrCountedRows(),
-					"columns": len(doc.Meta.Columns), "form": formName(doc.Form),
-					"profile": string(doc.Source.Profile),
-				}
-				if doc.Source.Reference != "" {
-					out["reference"] = doc.Source.Reference
-				}
-				if doc.Source.ReferencePath != "" {
-					out["reference_path"] = doc.Source.ReferencePath
-				}
-				_ = writeJSON(out)
-				return
-			}
-			line := fmt.Sprintf("ExCSV %s  rows=%d  columns=%d  form=%s  profile=%s",
-				doc.Header.Version, doc.DeclaredOrCountedRows(), len(doc.Meta.Columns), formName(doc.Form), doc.Source.Profile)
-			if doc.Source.Reference != "" {
-				line += fmt.Sprintf("  reference=%s", doc.Source.Reference)
-			}
-			fmt.Println(line)
+			runInfo(cfg, noMeta)
 		},
+	}
+	c.Flags().BoolVar(&noMeta, "no-meta", false, "omit #@ file metadata from the output")
+	c.AddCommand(&cobra.Command{
+		Use:   "header",
+		Short: "Column schema from #column lines",
+		Args:  cobra.NoArgs,
+		Run: func(cmd *cobra.Command, args []string) {
+			runInfoHeader(cfg)
+		},
+	})
+	return c
+}
+
+type infoExtras struct {
+	Aggregations []string
+	SQLCount     int
+	SQLKeys      []string
+	Meta         map[string]string
+}
+
+func runInfo(cfg *config, noMeta bool) {
+	path := targetPath()
+	res, err := loadDoc(cfg, path, false)
+	if err != nil {
+		exitParseErr(err)
+	}
+	printWarnings(res.Warnings)
+	if res.Pack != nil && cfg.table == "" && cfg.packTable == nil {
+		printPackInfo(cfg, res, noMeta)
+		return
+	}
+	doc := res.Doc
+	if cfg.packTable != nil {
+		doc = cfg.packTable.Document()
+	}
+	printDocumentInfo(cfg, doc, noMeta)
+}
+
+func runInfoHeader(cfg *config) {
+	doc, err := loadTableDoc(cfg, targetPath(), false)
+	if err != nil {
+		exitParseErr(err)
+	}
+	printInfoHeader(cfg, doc)
+}
+
+func columnNames(doc *excsv.Document) []string {
+	names := make([]string, 0, len(doc.Meta.Columns))
+	for _, col := range doc.Meta.Columns {
+		names = append(names, col.Attrs["name"])
+	}
+	return names
+}
+
+func printInfoHeader(cfg *config, doc *excsv.Document) {
+	names := columnNames(doc)
+	if cfg.jsonOut {
+		cols := make([]map[string]string, 0, len(doc.Meta.Columns))
+		for _, col := range doc.Meta.Columns {
+			cols = append(cols, col.Attrs)
+		}
+		_ = writeJSON(map[string]any{
+			"header":  names,
+			"columns": cols,
+		})
+		return
+	}
+	fmt.Println(strings.Join(names, ","))
+	for _, col := range doc.Meta.Columns {
+		fmt.Println(excsv.FormatColumnInfoLine(col.Attrs))
+	}
+}
+
+func collectInfoExtras(doc *excsv.Document, noMeta bool) infoExtras {
+	var out infoExtras
+	for _, a := range doc.Meta.Aggregations {
+		out.Aggregations = append(out.Aggregations, a.Name)
+	}
+	sort.Strings(out.Aggregations)
+
+	for _, s := range doc.Meta.SQL {
+		out.SQLKeys = append(out.SQLKeys, s.RawKey)
+	}
+	sort.Strings(out.SQLKeys)
+	out.SQLCount = len(out.SQLKeys)
+
+	if !noMeta {
+		meta := doc.MetaMap()
+		if len(meta) > 0 {
+			out.Meta = meta
+		}
+	}
+	return out
+}
+
+func printDocumentInfo(cfg *config, doc *excsv.Document, noMeta bool) {
+	extras := collectInfoExtras(doc, noMeta)
+	if cfg.jsonOut {
+		out := documentInfoJSON(doc)
+		applyInfoExtrasJSON(out, extras)
+		_ = writeJSON(out)
+		return
+	}
+	printDocumentInfoText(doc, extras)
+}
+
+func documentInfoJSON(doc *excsv.Document) map[string]any {
+	out := map[string]any{
+		"version": doc.Header.Version,
+		"rows":    doc.DeclaredOrCountedRows(),
+		"columns": len(doc.Meta.Columns),
+		"form":    formName(doc.Form),
+		"profile": string(doc.Source.Profile),
+		"delim":   doc.Header.DelimName,
+		"quote":   infoQuoteLabel(doc.Header),
+		"null":    infoNullLabel(doc.Header.Null),
+	}
+	if doc.Header.SQLDialect != "" {
+		out["sql_dialect"] = doc.Header.SQLDialect
+	}
+	if doc.Source.Reference != "" {
+		out["reference"] = doc.Source.Reference
+	}
+	if doc.Source.ReferencePath != "" {
+		out["reference_path"] = doc.Source.ReferencePath
+	}
+	return out
+}
+
+func infoQuoteLabel(h excsv.Header) string {
+	if !h.QuoteEnabled || h.QuoteName == "none" {
+		return "none (fields not quoted)"
+	}
+	return h.QuoteName
+}
+
+func infoNullLabel(null string) string {
+	if null == "" {
+		return "(empty string)"
+	}
+	return null
+}
+
+func printDocumentInfoText(doc *excsv.Document, extras infoExtras) {
+	fmt.Printf("ExCSV %s\n", doc.Header.Version)
+	fmt.Printf("Rows: %d\n", doc.DeclaredOrCountedRows())
+	fmt.Printf("Columns: %d\n", len(doc.Meta.Columns))
+	fmt.Printf("Form: %s\n", formName(doc.Form))
+	fmt.Printf("Profile: %s\n", doc.Source.Profile)
+	fmt.Printf("Delimiter: %s\n", doc.Header.DelimName)
+	fmt.Printf("Quote: %s\n", infoQuoteLabel(doc.Header))
+	fmt.Printf("Null: %s\n", infoNullLabel(doc.Header.Null))
+	if doc.Header.SQLDialect != "" {
+		fmt.Printf("SQL dialect: %s\n", doc.Header.SQLDialect)
+	}
+	if doc.Source.Reference != "" {
+		fmt.Printf("Reference: %s\n", doc.Source.Reference)
+	}
+	printInfoExtrasText(extras)
+}
+
+func applyInfoExtrasJSON(out map[string]any, extras infoExtras) {
+	if len(extras.Aggregations) > 0 {
+		out["aggregations"] = extras.Aggregations
+	}
+	if extras.SQLCount > 0 {
+		out["sql"] = map[string]any{"count": extras.SQLCount, "keys": extras.SQLKeys}
+	}
+	if len(extras.Meta) > 0 {
+		out["meta"] = extras.Meta
+	}
+}
+
+func printInfoExtrasText(extras infoExtras) {
+	if len(extras.Aggregations) > 0 {
+		fmt.Printf("Aggregations: %s\n", strings.Join(extras.Aggregations, ", "))
+	}
+	if extras.SQLCount > 0 {
+		fmt.Printf("SQL (%d): %s\n", extras.SQLCount, strings.Join(extras.SQLKeys, ", "))
+	}
+	if len(extras.Meta) > 0 {
+		keys := make([]string, 0, len(extras.Meta))
+		for k := range extras.Meta {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Printf("%s: %s\n", k, extras.Meta[k])
+		}
 	}
 }
 

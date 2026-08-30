@@ -1,26 +1,22 @@
 # excsv CLI — command map (grouped)
 
-**Status:** proposed layout for `internal/cli`. Two changes vs the shipped CLI:
+**Status:** **shipped** in **excsv-cli 0.0.3** (`internal/cli`). This document is the
+authoritative map of the grouped layout. Summary of what changed vs the pre-0.0.2 CLI:
 
-1. **Grouping** — replace the flat list of top-level commands with a small set of
-   whole-document verbs plus noun groups (`data`, `header`, `meta`, `column`, `agg`,
-   `sql`, `comment`, `export`, `pack`, `zip`). Every meta line the format defines has
-   exactly one owning group.
-2. **Deduplication** — collapse the overlapping check/repair commands (`validate`,
-   `verify`, `column check`, `freeze`, `tidy`) into one reporter (`validate`) and one
-   repairer (`fix`), each with an explicit dial; merge `strip` into `data print`; and
-   delete `cat`.
-3. **A real import command** — `convert` describes the source as fully as the source
-   allows, in one invocation, with `--format` choosing the output shape. It also
-   accepts ExCSV as input, which makes it the re-encoder.
-4. **A read-only `header`** — `header set` / `header remove` are deleted. Each
-   `#!excsv` field is written by whoever owns the thing it points at: `convert` for
-   the encoding, `fix` for the derived counts, `sql` for `sql-dialect=`.
-5. **Foreign formats at the boundary** — CSVW was removed from the ExCSV spec in
-   **v0.4** (`csvw=`, `schema=`, `#csvw:`). It survives in this tool as one thing
-   only: `export csvw`, which writes a CSVW metadata sidecar. Nothing reads CSVW and
-   nothing stores it. The same `export` group gives the spec's own JSON form
-   (`.excsv.json`) a command, which it has never had.
+1. **Grouping** — flat top-level commands replaced with whole-document verbs plus noun
+   groups (`data`, `header`, `meta`, `column`, `agg`, `sql`, `comment`, `export`,
+   `pack`, `zip`). Every meta line the format defines has exactly one owning group.
+2. **Deduplication** — `verify`, `column check`, `freeze`, and `tidy` collapsed into
+   `validate` (reporter) and `fix` (repairer); `strip` merged into `data print`; `cat`
+   deleted.
+3. **Import / re-encode** — `convert` describes the source in one invocation
+   (`--format`, enrichment flags) and accepts ExCSV as input for re-encoding.
+4. **Read-only `header`** — `header set` / `header remove` deleted; each `#!excsv`
+   field is written by its owner (`convert`, `fix`, `sql dialect set`, …).
+5. **Boundary exports** — CSVW removed from the ExCSV v0.4 document; survives only
+   as `export csvw` (write-only). The normative JSON form ships as `export json`.
+6. **Rich `info`** — multi-line document summary plus `info header` for `#column`
+   schema (distinct from the read-only `header` group for `#!excsv`).
 
 **Binary:** `excsv` (built from `cmd/excsv`)
 
@@ -125,7 +121,9 @@ Flags may appear before or after `FILE` (e.g. `excsv --json sales.excsv info`).
 ```
 excsv [--flags] FILE
 │
-├── info                     # compact summary (version, rows, columns, form, profile)
+├── info                     # document summary (default) or column schema view
+│   [--no-meta]              #   omit #@ file metadata from the default summary
+│   └── header               #   #column schema: names row + one attribute line per column
 │
 ├── validate                 # read-only conformance report; never writes
 │   [--with-data]            #   also scan the data section (see levels below)
@@ -230,6 +228,83 @@ excsv version                # no FILE; prints excsv-cli <version> (built <time>
 
 ---
 
+## `info` — document summary and column header view
+
+Read-only. Never writes `FILE`. Reads the meta section only (no data scan, no ZIP/pack
+body decompression) except where noted.
+
+**Two surfaces, one command:**
+
+| Invocation | Shows |
+|------------|-------|
+| `excsv FILE info` | Multi-line document summary (default). |
+| `excsv FILE info header` | Column schema from `#column` lines only. |
+
+This is **not** the `header` group. That group owns `#!excsv` (`header list`,
+`header get`, `header rows`). `info header` owns the **logical table header** —
+the `#column` declarations — and prints them in a human-oriented layout.
+
+### Default summary (`info`)
+
+```text
+ExCSV 0.4
+Rows: 3
+Columns: 3
+Form: plain
+Profile: inline
+Delimiter: comma
+Quote: none (fields not quoted)
+Null: (empty string)
+SQL dialect: mysql              # only when sql-dialect= is set
+Reference: sales.csv            # sidecar only, when present
+Aggregations: sum, count        # names only, never #% values
+SQL (2): ddl, dql               # count + #$ keys only, never payloads
+author: author@example.com      # every #@ entry (key: value)
+license: CC-BY-4.0
+```
+
+**Dialect lines** spell out what the data section uses:
+
+- **Delimiter** — `delim=` token (`comma`, `tab`, `pipe`, …).
+- **Quote** — `double` / `single`, or `none (fields not quoted)` when quoting is off.
+- **Null** — `(empty string)` when `null=` is absent; otherwise the literal token
+  (`NA`, `\N`, …).
+- **SQL dialect** — omitted when unset; unsuffixed `#$` lines fall back to `ansi`.
+
+**Aggregations and SQL** list *what exists*, not what it contains. For values use
+`agg list` / `agg get` and `sql list` / `sql get`.
+
+**`--no-meta`** suppresses every `#@` line from the summary. Aggregations, SQL keys,
+and dialect fields are unaffected.
+
+**Pack without `--table`:** summary line shows the manifest (`Form: pack`, table
+names, foreign-key count). Manifest-level `#@` / `#$` on the pack document appear
+when present; per-table aggregations and SQL require `--table`.
+
+Global `--json` emits a structured object with the same fields (`aggregations`,
+`sql.count` / `sql.keys`, `meta`, …).
+
+### Column header view (`info header`)
+
+Reads `#column` only — no data section.
+
+```text
+id,customer,amount
+name: id, type: int, unique: 1
+name: customer, type: string, required: 1, len_max: 100
+name: amount, type: decimal, unit: USD, min: 0
+```
+
+- **Line 1** — comma-separated `name=` values in `#column` order.
+- **Following lines** — one column each; attributes in spec display order (`name`,
+  `title`, `type`, …). Values with spaces are quoted: `title: "Order ID"`.
+
+For raw `#column` lines use `column list`. Multi-table packs require `--table`.
+
+Global `--json` emits `{"header": ["id", …], "columns": [{…attrs…}, …]}`.
+
+---
+
 ## `validate` — the single reporter
 
 Replaces `validate` + `verify` + `column check`.
@@ -269,54 +344,35 @@ so does `checksum_mismatch` — which the old `verify` could not express at all.
 
 ### Check coverage
 
-Legend: **have** = already implemented · **move** = implemented but currently
-surfaced at the wrong level · **new** = needs to be written.
+Legend: **have** = implemented (since excsv-cli 0.0.2).
 
 | Check | Status | Level |
 |-------|--------|-------|
 | Structure, delimiters, quoting, ragged rows, encoding, ZIP/sidecar resolution | have (parse; mandatory — the file is unreadable otherwise) | always |
 | Unknown `version=`, `.extsv` without `delim=tab`, unknown `#column` attributes | have (parse warnings) | schema |
-| Malformed `pattern=` (regexp does not compile) | **move** — `ErrColumnMalformedAttribute` fires inside `CheckSchema`, so today it only surfaces on a full data pass | schema |
-| Unknown `type=` | **new** — silently skipped today for forward compatibility; should warn | schema |
-| Attribute sanity: `min > max`, `len_min > len_max`, duplicate `name=`, colliding `index=`, `default`/`enum` unparseable under the declared `type` | **new** — nothing checks this | schema |
-| `reference=` present on an inline document (spec: **MUST NOT**) | **new** | schema |
-| Unrecognized `#` meta lines survive a rewrite | **new**, and load-bearing — see below | always |
-| Cell types, `enum`, `pattern`, `min`/`max`, `len_min`/`len_max`, `required` | have (`CheckSchema`) | data |
-| `rows=` vs actual count | have (`applyRowsMismatchWarning`) | data |
-| `checksum=` | have (`applyChecksumWarning`) | data |
-| Stored `#%` vs recomputation | **new** — `ComputeAggregationValues` exists but nothing compares; upstream plan M5 | data |
-| `unique=` | **new** — code comments state it is "a hint and is not enforced" | data |
+| Malformed `pattern=` (regexp does not compile) | have (`checkColumnDeclaration`) | schema |
+| Unknown `type=` | have (`ErrColumnUnknownType`) | schema |
+| Attribute sanity: `min > max`, `len_min > len_max`, duplicate `name=`, colliding `index=`, `default`/`enum` unparseable under the declared `type` | have (`checkColumnDeclaration`) | schema |
+| `reference=` present on an inline document (spec: **MUST NOT**) | have (`ErrReferenceOnInline`) | schema |
+| Unrecognized `#` meta lines carried through rewrite | have (`Meta.Unknown` + `ErrUnknownMetaLine` finding) | schema |
+| Cell types, `enum`, `pattern`, `min`/`max`, `len_min`/`len_max`, `required` | have (`checkColumnValues`) | data |
+| `rows=` vs actual count | have | data |
+| `checksum=` | have | data |
+| Stored `#%` vs recomputation | have (`checkAggregations` / `ErrAggStale`) | data |
+| `unique=1` duplicate values | have (`checkUnique` / `ErrColumnNotUnique`) | data |
 
 Four checks about `csvw=` / `schema=` / `#csvw` coherence were in this table and are
 gone: those fields were **removed in v0.4**, so there is nothing to be coherent about.
 That is four checks deleted rather than written, which is the best kind of scope
 reduction.
 
-### Unrecognized meta lines must survive a rewrite
+### Unrecognized meta lines
 
-Not a `validate` check so much as a precondition for everything else, and it is
-broken today. `parse.go` ends its meta-line dispatch with a bare `default:` that
-stores nothing:
-
-```go
-		default:
-			lastWasSQL = false
-		}
-```
-
-There is no collection of unknown lines anywhere, so any `#` line the parser does
-not recognize is **destroyed** the first time `fix`, `convert`, or any `set` writes
-the file. The spec says such lines **MUST** be ignored — but for a *writer*, "ignore"
-has to mean "carry through", otherwise this tool silently strips whatever a newer
-format version introduced.
-
-This is now load-bearing rather than merely correct: in v0.3 documents, `#csvw` is
-an unrecognized line. Under the current behavior, running `fix` on one of those
-files deletes the payload. Fix:
-collect unknown meta lines verbatim with their source position and re-emit them in
-`Serialize`. `validate` should report their presence as an informational finding —
-you probably want to know your file carries something this version cannot interpret —
-and `fix` must never touch them.
+Implemented in v0.0.2. Unrecognized `#` lines are collected in `Meta.Unknown`,
+re-emitted verbatim by `Serialize`, reported by `validate` as informational findings
+(`ErrUnknownMetaLine`), and never modified by `fix`. This matters for forward
+compatibility: v0.3 documents may carry `#csvw` lines that this version does not
+interpret but must not strip on rewrite.
 
 ---
 
@@ -781,7 +837,7 @@ a missing feature; it is a rejected one.
 
 | Command | Purpose |
 |---------|---------|
-| `info` | One-line summary; JSON adds `delim`, `quote`, `reference`, `reference_path`. Pack prints table list. |
+| `info` | Multi-line read-only summary: version, rows, columns, form, profile, delimiter, quote, null, optional `sql-dialect`, sidecar `reference`, aggregation *names*, SQL *keys* (with count), and all `#@` metadata. `--no-meta` hides `#@`. Subcommand `info header` prints the `#column` schema (names row + attribute lines). Pack without `--table` summarizes the manifest. Global `--json` available. |
 | `validate` | Read-only conformance report. See section above. |
 | `fix` | In-place repair of derived metadata. See section above. |
 | `convert` | Import CSV/TSV → ExCSV, in any of four output shapes, with optional enrichment. See section above. |
@@ -809,6 +865,9 @@ a missing feature; it is a rejected one.
   `convert --columns` (a bool that emits `#column` lines).
 
 ### `header` — `#!excsv`, read-only
+
+**Not the same as `info header`.** This group owns the magic line (`#!excsv …`).
+`info header` owns `#column` and lives under `info` — see the `info` section above.
 
 **`header set` and `header remove` are deleted.** The header line is the one place
 where a piecemeal edit can quietly break the document: change `delim` and the data

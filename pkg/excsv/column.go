@@ -136,6 +136,16 @@ func (doc *Document) RemoveColumn(name string) bool {
 }
 
 func FormatColumnAttrs(attrs map[string]string) string {
+	return formatColumnAttrParts(attrs, formatColumnAttr)
+}
+
+// FormatColumnInfoLine renders #column attributes for `info header` output:
+// name: order_id, title: "Order ID", type: long
+func FormatColumnInfoLine(attrs map[string]string) string {
+	return formatColumnAttrParts(attrs, formatColumnInfoAttr)
+}
+
+func formatColumnAttrParts(attrs map[string]string, format func(k, v string) string) string {
 	seen := map[string]bool{}
 	var parts []string
 	for _, k := range columnAttrDisplayOrder {
@@ -144,7 +154,7 @@ func FormatColumnAttrs(attrs map[string]string) string {
 			continue
 		}
 		seen[k] = true
-		parts = append(parts, formatColumnAttr(k, v))
+		parts = append(parts, format(k, v))
 	}
 	var extra []string
 	for k := range attrs {
@@ -154,9 +164,16 @@ func FormatColumnAttrs(attrs map[string]string) string {
 	}
 	sort.Strings(extra)
 	for _, k := range extra {
-		parts = append(parts, formatColumnAttr(k, attrs[k]))
+		parts = append(parts, format(k, attrs[k]))
 	}
-	return strings.Join(parts, " ")
+	return strings.Join(parts, ", ")
+}
+
+func formatColumnInfoAttr(k, v string) string {
+	if strings.ContainsAny(v, " \t,") || strings.Contains(v, `"`) {
+		return k + ": \"" + strings.ReplaceAll(v, "\"", "\"\"") + "\""
+	}
+	return k + ": " + v
 }
 
 func formatColumnAttr(k, v string) string {

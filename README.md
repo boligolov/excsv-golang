@@ -30,7 +30,7 @@ Verify you picked up the new binary:
 
 ```powershell
 .\bin\excsv.exe version
-# excsv-cli 0.0.2 (built …)
+# excsv-cli 0.0.3 (built …)
 ```
 
 > If rebuild fails with "Cannot remove stale binary", close any running `excsv.exe` first — Windows locks the file while it's in use.
@@ -162,15 +162,15 @@ GitHub Actions:
 | Workflow | Trigger | Result |
 | --- | --- | --- |
 | **CI** (`.github/workflows/ci.yml`) | push / PR → `main` | test + cross-compile 6 platforms; artifact `excsv-binaries` on push to `main` |
-| **Release** (`.github/workflows/release.yml`) | tag `v*` (e.g. `v0.0.2`) | test + build + GitHub Release: `excsv-{os}-{arch}.zip` (contains `excsv` / `excsv.exe` + zip comment banner) + `SHA256SUMS.txt` |
+| **Release** (`.github/workflows/release.yml`) | tag `v*` (e.g. `v0.0.3`) | test + build + GitHub Release: `excsv-{os}-{arch}.zip` (contains `excsv` / `excsv.exe` + zip comment banner) + `SHA256SUMS.txt` |
 
 Version stamped into binaries: latest `v*` tag via `git describe`, or `internal/cli/version.go` when untagged.
 
 **Cut a release:**
 
 ```powershell
-git tag v0.0.2
-git push origin v0.0.2
+git tag v0.0.3
+git push origin v0.0.3
 ```
 
 No secrets required — `GITHUB_TOKEN` publishes the release automatically.
@@ -269,7 +269,7 @@ docs/downloaded/     Spec hub + guide/ + implementation/ (gitignored; sync from 
 | --- | --- | --- |
 | 1 | Plain `.excsv` parse, convert, data, schema, sidecar | Done |
 | 2 | Row `.excsv.zip` read/write, zip CLI, password | Done |
-| 3 | Pack, grouped CLI (v0.0.2), validate/fix, export json/csvw | Done |
+| 3 | Pack, grouped CLI (v0.0.2+), validate/fix, export json/csvw, rich `info` | Done |
 | 4+ | Streaming, diff | Not yet |
 
 ## License

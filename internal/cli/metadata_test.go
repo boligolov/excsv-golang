@@ -30,7 +30,7 @@ func TestCLIZipMetadataCommands(t *testing.T) {
 		{"meta get file only", []string{zipPath, "meta", "get"}, "author:", false},
 		{"sql list", []string{zipPath, "sql", "list"}, "#$ddl", false},
 		{"sql get key", []string{zipPath, "sql", "get", "ddl"}, "CREATE TABLE", false},
-		{"info", []string{zipPath, "info"}, "rows=", false},
+		{"info", []string{zipPath, "info"}, "Rows:", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
