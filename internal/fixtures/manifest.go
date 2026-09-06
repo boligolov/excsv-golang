@@ -334,6 +334,7 @@ var UpstreamFixtureBugs = map[string]string{
 	"plain/invalid/024_invalid_utf8_byte_sequence.excsv":        "file contains U+FFFD (valid UTF-8), not an invalid sequence",
 	"pack/invalid/006_section_partition_error.excsv.pack.zip":   "generator corrupts 04.col but files are named 4.col",
 	"pack/invalid/007_section_boundary_mismatch.excsv.pack.zip": "generator corrupts 04.col/02.col but pad width is 1",
+	"zip/valid/013_comment_header_disagree.excsv.zip":           "generator injects the disagreement via replace(\"version=0.4\", \"version=0.2\"), a no-op now that the derived plain fixture says version=0.5 — comment and header end up byte-identical, so there is genuinely nothing to warn about",
 }
 
 func packDialects(p *excsv.Pack) []string {
