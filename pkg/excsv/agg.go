@@ -55,18 +55,11 @@ func columnCountForAgg(doc *Document) int {
 }
 
 func columnTypeAt(doc *Document, col int) string {
-	for i, c := range doc.Meta.Columns {
-		idx := i
-		if v, ok := c.Attrs["index"]; ok {
-			if n, err := strconv.Atoi(v); err == nil {
-				idx = n
-			}
-		}
-		if idx == col {
-			return strings.ToLower(strings.TrimSpace(c.Attrs["type"]))
-		}
+	def, ok := doc.columnDefAt(col)
+	if !ok {
+		return ""
 	}
-	return ""
+	return strings.ToLower(strings.TrimSpace(def.Attrs["type"]))
 }
 
 func isMeasureColumnType(t string) bool {
@@ -108,33 +101,19 @@ func isStringColumnType(t string) bool {
 }
 
 func columnRoleAt(doc *Document, col int) string {
-	for i, c := range doc.Meta.Columns {
-		idx := i
-		if v, ok := c.Attrs["index"]; ok {
-			if n, err := strconv.Atoi(v); err == nil {
-				idx = n
-			}
-		}
-		if idx == col {
-			return strings.ToLower(strings.TrimSpace(c.Attrs["role"]))
-		}
+	def, ok := doc.columnDefAt(col)
+	if !ok {
+		return ""
 	}
-	return ""
+	return strings.ToLower(strings.TrimSpace(def.Attrs["role"]))
 }
 
 func columnAggHintAt(doc *Document, col int) string {
-	for i, c := range doc.Meta.Columns {
-		idx := i
-		if v, ok := c.Attrs["index"]; ok {
-			if n, err := strconv.Atoi(v); err == nil {
-				idx = n
-			}
-		}
-		if idx == col {
-			return strings.ToLower(strings.TrimSpace(c.Attrs["agg"]))
-		}
+	def, ok := doc.columnDefAt(col)
+	if !ok {
+		return ""
 	}
-	return ""
+	return strings.ToLower(strings.TrimSpace(def.Attrs["agg"]))
 }
 
 func cellAt(doc *Document, row []string, col int) string {

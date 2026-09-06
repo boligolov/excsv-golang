@@ -85,7 +85,12 @@ func saveDocument(cfg *config, doc *excsv.Document, userPath string) error {
 		if ins.Encrypted {
 			wrapPassword = password
 		}
-		zipped, err := excsv.WrapZipWithPassword(serialized, ext.PrimaryName, ext.Comment, wrapPassword)
+		// Comment "" rebuilds it from the freshly-serialized inner content
+		// (buildComment in the zip package) instead of carrying over the
+		// pre-mutation comment, which would otherwise go stale the moment
+		// any Mode-A command changes the inner header/schema (J4: refresh
+		// comment after inner-file mutation).
+		zipped, err := excsv.WrapZipWithPassword(serialized, ext.PrimaryName, "", wrapPassword)
 		if err != nil {
 			return err
 		}

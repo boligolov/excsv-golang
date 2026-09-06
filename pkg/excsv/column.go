@@ -11,6 +11,7 @@ var columnAttrDisplayOrder = []string{
 	"name", "index", "title", "description", "type", "format", "unit",
 	"role", "agg", "order", "separator", "enum", "pattern", "regexp_dialect",
 	"min", "max", "len_min", "len_max", "unique", "required", "default",
+	"formula", "materialized",
 }
 
 // ColumnIndex resolves a header name, #column name=, or numeric index.
@@ -31,14 +32,25 @@ func (doc *Document) ColumnIndex(ref string) (int, error) {
 			return i, nil
 		}
 	}
-	for i, col := range doc.Meta.Columns {
+	// Declaration order only matches physical position once virtual computed
+	// columns (formula= set, not materialized) are excluded from the count:
+	// a virtual column has no header cell and no field in any row.
+	phys := 0
+	for _, col := range doc.Meta.Columns {
+		virtual := isVirtualColumn(col)
 		if col.Attrs["name"] == ref {
+			if virtual {
+				return -1, fmt.Errorf("column %s is virtual (formula=), has no physical index", ref)
+			}
 			if v, ok := col.Attrs["index"]; ok {
 				if n, err := strconv.Atoi(v); err == nil {
 					return n, nil
 				}
 			}
-			return i, nil
+			return phys, nil
+		}
+		if !virtual {
+			phys++
 		}
 	}
 	return -1, fmt.Errorf("unknown column: %s", ref)
@@ -58,8 +70,15 @@ func (doc *Document) columnWidth() int {
 }
 
 func (doc *Document) columnDefAt(col int) (ColumnDef, bool) {
-	for i, c := range doc.Meta.Columns {
-		idx := i
+	// See ColumnIndex: declaration order maps to physical position only over
+	// non-virtual columns, since a virtual computed column occupies no
+	// physical slot.
+	phys := 0
+	for _, c := range doc.Meta.Columns {
+		if isVirtualColumn(c) {
+			continue
+		}
+		idx := phys
 		if v, ok := c.Attrs["index"]; ok {
 			if n, err := strconv.Atoi(v); err == nil {
 				idx = n
@@ -68,6 +87,7 @@ func (doc *Document) columnDefAt(col int) (ColumnDef, bool) {
 		if idx == col {
 			return c, true
 		}
+		phys++
 	}
 	return ColumnDef{}, false
 }

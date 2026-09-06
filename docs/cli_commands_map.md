@@ -176,7 +176,9 @@ excsv [--flags] FILE
 │   ├── list
 │   ├── get [NAME]
 │   ├── set NAME --attr k=v...
-│   └── remove NAME          # (check → validate --with-data --column NAME)
+│   ├── remove NAME          # (check → validate --with-data --column NAME)
+│   ├── materialize NAME [-o OUT]     # write formula= output into the data, set materialized=1
+│   └── dematerialize NAME [-o OUT]   # drop cached values, keep formula= (v0.5 computed columns)
 │
 ├── agg                      # #% aggregations
 │   ├── list
@@ -674,7 +676,7 @@ reading it would put a foreign schema in a position to contradict the document.
 
 | Command | Output | Fidelity |
 |---------|--------|----------|
-| `export json` | the v0.4 JSON form | lossless except `##` (see below) |
+| `export json` | the v0.5 JSON form | lossless except `##` (see below) |
 | `export csvw` | a CSVW metadata sidecar | lossy, and says exactly what it dropped |
 
 **The two have different contracts and must report differently.** `export json` is a
@@ -689,11 +691,11 @@ a full peer of the text form, so an `import json` is a legitimate future command
 
 ### `export json` — the JSON form that had no command
 
-This is the gap that matters more than CSVW. `implementation/json.md` (v0.4) is
+This is the gap that matters more than CSVW. `implementation/json.md` (v0.5) is
 normative: it defines a **bijection** — *"any conforming ExCSV text document maps to
 exactly one JSON document and back, with no loss"* — ships
-[`schema/excsv.schema.json`](https://excsv.org/schema/excsv-0.4.schema.json)
-(draft 2020-12, `$id` `https://excsv.org/schema/excsv-0.4.schema.json`) and an
+[`schema/excsv.schema.json`](https://excsv.org/schema/excsv-0.5.schema.json)
+(draft 2020-12, `$id` `https://excsv.org/schema/excsv-0.5.schema.json`) and an
 example, and calls out LLM structured output as a target.
 
 Output defaults to stdout; `-o` writes a `.excsv.json` file. The JSON form is not a
@@ -917,7 +919,7 @@ reporting a declared-vs-actual disagreement is `validate --with-data`'s job.
 | Group | Line | Verbs |
 |-------|------|-------|
 | `meta` | `#@` | `list`, `get`, `set`, `remove` |
-| `column` | `#column` | `list`, `get`, `set`, `remove` |
+| `column` | `#column` | `list`, `get`, `set`, `remove`, `materialize`, `dematerialize` |
 | `agg` | `#%` | `list`, `get`, `add`, `update`, `remove` |
 | `sql` | `#$` + `sql-dialect=` | `list`, `get`, `set`, `remove`, `dialect get/set/remove` |
 | `comment` | `##` | `list`, `add`, `remove` |
@@ -925,11 +927,25 @@ reporting a declared-vs-actual disagreement is `validate --with-data`'s job.
 `sql` is the only meta-line group that also owns a header field, because
 `sql-dialect=` is a pointer at the lines it manages.
 
+**`column materialize`/`dematerialize`** are the two verbs `column` has beyond
+the uniform `list`/`get`/`set`/`remove` shape — the v0.5 computed-column pair.
+A `#column formula=` is virtual by default (no header cell, no field in any
+row); `materialize NAME` evaluates it and writes the values in as an ordinary
+trailing column, setting `materialized=1`; `dematerialize NAME` removes that
+cached data and clears `materialized`, without ever touching `formula=`. Both
+rewrite `FILE` in place (or `-o`) for plain, row ZIP, and pack exactly like
+any other Mode A write — `MaterializeColumn`/`DematerializeColumn` only touch
+`Document.Data`/`Document.Meta`, so the existing zip re-wrap and pack
+`.col`-file resync pick up the change for free. A **sidecar is the one
+exception**: its reference is never rewritten, so both verbs instead write a
+brand-new inline file (`-o`, or `<name>.materialized.excsv` by default) and
+leave the sidecar and its referenced CSV untouched.
+
 ### `export` — foreign representations
 
 | Command | Purpose |
 |---------|---------|
-| `export json` | The v0.4 JSON form (`.excsv.json`). Lossless except `##`, per the spec. |
+| `export json` | The v0.5 JSON form (`.excsv.json`). Lossless except `##`, per the spec. |
 | `export csvw` | A CSVW metadata sidecar. Lossy; names every dropped attribute. Write-only. |
 
 Not a meta-line group — it owns no lines and writes no ExCSV. It exists because both

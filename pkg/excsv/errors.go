@@ -72,6 +72,16 @@ const (
 	ErrExtsvDelimMismatch        ErrorKind = "extsv_delim_mismatch"
 	ErrSidecarChecksumMismatch   ErrorKind = "sidecar_checksum_mismatch"
 	ErrReferenceOnInline         ErrorKind = "reference_on_inline"
+
+	// Computed columns (formula=/materialized=), added in v0.5.
+	ErrFormulaReferencesComputed    ErrorKind = "formula_references_computed"
+	ErrFormulaUnknownReference      ErrorKind = "formula_unknown_reference"
+	ErrFormulaParseError            ErrorKind = "formula_parse_error"
+	ErrFormulaIndexForbidden        ErrorKind = "formula_index_forbidden"
+	ErrFormulaRequiresHeader        ErrorKind = "formula_requires_header"
+	ErrComputedMaterializedMismatch ErrorKind = "computed_materialized_mismatch"
+	ErrComputedDefaultIgnored       ErrorKind = "computed_default_ignored"
+	ErrComputedStale                ErrorKind = "computed_stale"
 )
 
 // ErrSidecarDelimExtMismatch is the old name; fixtures use extsv_delim_mismatch.

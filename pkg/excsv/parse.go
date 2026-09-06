@@ -386,7 +386,12 @@ func upsertKV(list []KV, key, val string) []KV {
 
 func columnCountFromSchema(cols []ColumnDef) int {
 	max := -1
+	physical := 0
 	for _, c := range cols {
+		if isVirtualColumn(c) {
+			continue
+		}
+		physical++
 		if idx, ok := c.Attrs["index"]; ok {
 			n := 0
 			okNum := true
@@ -405,8 +410,8 @@ func columnCountFromSchema(cols []ColumnDef) int {
 	if max >= 0 {
 		return max + 1
 	}
-	if len(cols) > 0 {
-		return len(cols)
+	if physical > 0 {
+		return physical
 	}
 	return 0
 }
@@ -424,7 +429,23 @@ func effectiveColumnCount(doc *Document, headerWidth int) int {
 
 func validateColumns(res *ParseResult, headerWidth int) error {
 	doc := res.Doc
-	for i, col := range doc.Meta.Columns {
+	phys := 0
+	for _, col := range doc.Meta.Columns {
+		if col.Attrs["formula"] != "" {
+			if !doc.Header.HeaderRow {
+				return fail(ErrFormulaRequiresHeader, col.Line, "formula= requires header=1")
+			}
+			if _, ok := col.Attrs["index"]; ok {
+				return fail(ErrFormulaIndexForbidden, col.Line, "formula= column must not carry index=")
+			}
+		}
+		if isVirtualColumn(col) {
+			// No header cell, no data field: excluded from physical position
+			// entirely, so there is nothing further to check against the row.
+			continue
+		}
+		i := phys
+		phys++
 		if doc.Header.HeaderRow {
 			name, hasName := col.Attrs["name"]
 			if !hasName || name == "" {

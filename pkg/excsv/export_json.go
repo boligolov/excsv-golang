@@ -24,7 +24,7 @@ type JSONExportResult struct {
 	Dropped []string
 }
 
-// ExportJSON writes the v0.4 JSON form of the document (implementation/json.md).
+// ExportJSON writes the v0.5 JSON form of the document (implementation/json.md).
 //
 // The one documented loss is the spec's own: free-text ## comments carry no
 // structured meaning and have no JSON slot.
@@ -179,15 +179,21 @@ func (doc *Document) jsonColumns() []any {
 		return nil
 	}
 	out := make([]any, 0, len(doc.Meta.Columns))
-	for i, col := range doc.Meta.Columns {
+	phys := 0
+	for _, col := range doc.Meta.Columns {
 		entry := newOrderedJSON()
-		// index is REQUIRED on every column object in the JSON form, even
-		// though the text form only requires it when header=0.
-		idx := i
-		if v, ok := parseAttrInt(col.Attrs["index"]); ok {
-			idx = v
+		// index is REQUIRED on every physical column object in the JSON
+		// form, even though the text form only requires it when header=0 —
+		// but MUST NOT be present on a virtual computed column, which has
+		// no physical position at all.
+		if !isVirtualColumn(col) {
+			idx := phys
+			if v, ok := parseAttrInt(col.Attrs["index"]); ok {
+				idx = v
+			}
+			entry.set("index", idx)
+			phys++
 		}
-		entry.set("index", idx)
 		colType := col.Attrs["type"]
 		for _, k := range columnAttrDisplayOrder {
 			v, ok := col.Attrs[k]
@@ -213,7 +219,7 @@ func (doc *Document) jsonColumns() []any {
 
 func jsonColumnAttr(key, value, columnType string) any {
 	switch key {
-	case "unique", "required":
+	case "unique", "required", "materialized":
 		return value == "1"
 	case "enum":
 		parts := strings.Split(value, "|")

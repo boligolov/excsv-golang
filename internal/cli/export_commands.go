@@ -20,8 +20,8 @@ func newExportJSONCmd(cfg *config) *cobra.Command {
 	var out string
 	c := &cobra.Command{
 		Use:   "json",
-		Short: "Write the v0.4 JSON form (.excsv.json)",
-		Long: `Write the v0.4 JSON form (.excsv.json).
+		Short: "Write the v0.5 JSON form (.excsv.json)",
+		Long: `Write the v0.5 JSON form (.excsv.json).
 
 The text and JSON forms are a bijection by specification, so this export is
 lossless with exactly one exception: free-text ## comments carry no structured

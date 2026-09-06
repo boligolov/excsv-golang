@@ -2,7 +2,14 @@
 
 Reference index for building **excsv-cli** (Go). Use the upstream [boligolov/excsv](https://github.com/boligolov/excsv) repo as the normative source; local copies are convenience snapshots, not forks.
 
-Upstream spec is **v0.4**. This repo implements the **row family** (plain + zip) and **pack family** (`.excsv.pack.zip`).
+Upstream spec is **v0.5**. This repo implements the **row family** (plain + zip) and **pack family** (`.excsv.pack.zip`).
+
+## v0.5 changes (vs v0.4)
+
+| Area | Change |
+| --- | --- |
+| **Version** | `version=0.5` |
+| **Computed columns** | `#column formula=` declares a value derived from other stored columns instead of stored data; `materialized=1` caches it as an ordinary column. Reversible via `column materialize` / `column dematerialize`. Virtual by default: no header cell, no field in any row, no pack `.col` file. Normative spec: [`implementation/columns.md`](downloaded/implementation/columns.md#computed-columns-formula). New error codes in [`error-handling.md`](downloaded/implementation/error-handling.md#computed-columns). |
 
 ## v0.4 changes (vs v0.3)
 

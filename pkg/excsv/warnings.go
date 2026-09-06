@@ -9,6 +9,7 @@ var implementedVersions = map[string]bool{
 	"0.2": true,
 	"0.3": true,
 	"0.4": true,
+	"0.5": true,
 }
 
 var knownColumnAttrs = map[string]bool{
@@ -17,6 +18,7 @@ var knownColumnAttrs = map[string]bool{
 	"order": true, "separator": true, "enum": true, "pattern": true,
 	"regexp_dialect": true, "min": true, "max": true, "len_min": true,
 	"len_max": true, "unique": true, "required": true, "default": true,
+	"formula": true, "materialized": true,
 }
 
 func (r *ParseResult) warn(kind ErrorKind, line int, msg string) {

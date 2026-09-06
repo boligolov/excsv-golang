@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const CurrentVersion = "0.4"
+const CurrentVersion = "0.5"
 
 type Form int
 

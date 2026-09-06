@@ -115,10 +115,24 @@ func (doc *Document) Validate(opts ValidateOptions) ValidateReport {
 				kind = ErrChecksumUnknownAlgorithm
 			}
 			add(newIssue(kind, 1, err.Error()), "checksum")
+			if kind == ErrChecksumMismatch {
+				// The data changed underneath a checksum that hasn't been
+				// refreshed; any materialized computed column's cached
+				// values may equally be stale.
+				for _, col := range doc.Meta.Columns {
+					if col.Attrs["formula"] != "" && col.Attrs["materialized"] == "1" {
+						add(newIssue(ErrComputedStale, col.Line,
+							"column "+col.Attrs["name"]+": materialized value may not reflect current formula output"), "")
+					}
+				}
+			}
 		}
 	}
 	for _, iss := range doc.checkAggregations() {
 		add(iss, "agg")
+	}
+	for _, iss := range doc.checkComputedMaterialization() {
+		add(iss, "")
 	}
 	return report
 }
@@ -168,7 +182,95 @@ func (doc *Document) checkDeclarations() []Issue {
 			issues = append(issues, newIssue(ErrSQLUnknownDialect, stmt.Line, "unknown SQL dialect "+stmt.Dialect))
 		}
 	}
+	issues = append(issues, doc.checkComputedColumns()...)
 	return issues
+}
+
+// checkComputedColumns validates #column formula=/materialized= against the
+// rest of the schema: unknown/chained references, unparseable formulas, and
+// a materialized= flag that disagrees with whether the column actually has
+// physical data. index=/header=0 combinations are already rejected at parse
+// time (validateColumns), since those are structural, not merely advisory.
+func (doc *Document) checkComputedColumns() []Issue {
+	var issues []Issue
+	byName := map[string]ColumnDef{}
+	for _, col := range doc.Meta.Columns {
+		if name := col.Attrs["name"]; name != "" {
+			byName[name] = col
+		}
+	}
+	for _, col := range doc.Meta.Columns {
+		expr := col.Attrs["formula"]
+		if expr == "" {
+			continue
+		}
+		name := col.Attrs["name"]
+		label := "column " + name + ": "
+
+		if col.Attrs["default"] != "" || col.Attrs["required"] != "" {
+			issues = append(issues, newIssue(ErrComputedDefaultIgnored, col.Line,
+				label+"default=/required= is ignored on a computed column"))
+		}
+
+		node, err := parseFormula(expr)
+		if err != nil {
+			issues = append(issues, newIssue(ErrFormulaParseError, col.Line, label+err.Error()))
+			continue
+		}
+		for _, ref := range formulaReferencedNames(node) {
+			target, ok := byName[ref]
+			if !ok {
+				issues = append(issues, newIssue(ErrFormulaUnknownReference, col.Line,
+					label+"formula references unknown column "+ref))
+				continue
+			}
+			if target.Attrs["formula"] != "" {
+				issues = append(issues, newIssue(ErrFormulaReferencesComputed, col.Line,
+					label+"formula references computed column "+ref+" (chaining is not supported)"))
+			}
+		}
+
+	}
+	return issues
+}
+
+// checkComputedMaterialization compares materialized= against whether the
+// column actually has physical data. Unlike checkComputedColumns, this needs
+// the data section to have actually been read — a metadata-only read (a
+// zip/pack "peek" that only parses the comment/manifest, the default
+// schema-only validate pass on a zip) sees an empty Data section regardless
+// of what the real data looks like, so this only runs under --with-data,
+// where the data section is guaranteed loaded.
+func (doc *Document) checkComputedMaterialization() []Issue {
+	var issues []Issue
+	for _, col := range doc.Meta.Columns {
+		if col.Attrs["formula"] == "" {
+			continue
+		}
+		name := col.Attrs["name"]
+		materialized := col.Attrs["materialized"] == "1"
+		hasData := columnHasPhysicalData(doc, name)
+		if materialized != hasData {
+			issues = append(issues, newIssue(ErrComputedMaterializedMismatch, col.Line,
+				"column "+name+": materialized= disagrees with whether physical data is present"))
+		}
+	}
+	return issues
+}
+
+// columnHasPhysicalData reports whether a computed column currently has a
+// header cell (and therefore a field in every row) — i.e. whether it has
+// actually been materialized, independent of what materialized= claims.
+func columnHasPhysicalData(doc *Document, name string) bool {
+	if name == "" || !doc.Data.HasHeaderRow {
+		return false
+	}
+	for _, cell := range doc.Data.HeaderRow {
+		if cell == name {
+			return true
+		}
+	}
+	return false
 }
 
 func checkColumnDeclaration(col ColumnDef) []Issue {

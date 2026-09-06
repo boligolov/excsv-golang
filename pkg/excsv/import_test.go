@@ -13,7 +13,7 @@ func TestImportDelimited_MinimalCSV(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := res.Doc
-	if doc.Header.Version != "0.4" {
+	if doc.Header.Version != excsv.CurrentVersion {
 		t.Fatalf("version=%q", doc.Header.Version)
 	}
 	if doc.Header.DelimName != "comma" {
@@ -167,7 +167,7 @@ func TestImportDelimited_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(string(out)) != "#!excsv version=0.4 delim=comma quote=none" {
+	if strings.TrimSpace(string(out)) != "#!excsv version="+excsv.CurrentVersion+" delim=comma quote=none" {
 		t.Fatalf("got %q", string(out))
 	}
 }

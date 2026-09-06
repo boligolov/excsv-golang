@@ -1,6 +1,9 @@
 package excsv
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // SetFileMeta sets or replaces a #@ metadata entry (last wins on duplicate keys).
 func (doc *Document) SetFileMeta(key, value string) {
@@ -118,6 +121,123 @@ func (doc *Document) RemoveHumanComment(index int) bool {
 	}
 	doc.Meta.HumanComments = append(doc.Meta.HumanComments[:index], doc.Meta.HumanComments[index+1:]...)
 	return true
+}
+
+// MaterializeColumn writes a virtual computed column's formula output into
+// the data as an ordinary trailing column (and header cell), and sets
+// materialized=1. formula= is kept either way. Errors if name is not a
+// currently-virtual formula column, or if the formula can't be evaluated.
+func (doc *Document) MaterializeColumn(name string) error {
+	idx, col, ok := doc.columnByName(name)
+	if !ok {
+		return fmt.Errorf("unknown column: %s", name)
+	}
+	expr := col.Attrs["formula"]
+	if expr == "" {
+		return fmt.Errorf("column %s has no formula=, nothing to materialize", name)
+	}
+	if col.Attrs["materialized"] == "1" {
+		return fmt.Errorf("column %s is already materialized", name)
+	}
+	if !doc.Data.HasHeaderRow {
+		return fail(ErrFormulaRequiresHeader, col.Line, "formula= requires header=1")
+	}
+
+	node, err := parseFormula(expr)
+	if err != nil {
+		return fail(ErrFormulaParseError, col.Line, err.Error())
+	}
+	refs := formulaReferencedNames(node)
+	refIdx := make(map[string]int, len(refs))
+	refType := make(map[string]string, len(refs))
+	for _, ref := range refs {
+		_, refDef, ok := doc.columnByName(ref)
+		if !ok {
+			return fail(ErrFormulaUnknownReference, col.Line, "formula references unknown column "+ref)
+		}
+		if refDef.Attrs["formula"] != "" {
+			return fail(ErrFormulaReferencesComputed, col.Line,
+				"formula references computed column "+ref+" (chaining is not supported)")
+		}
+		physIdx, err := doc.ColumnIndex(ref)
+		if err != nil {
+			return err
+		}
+		refIdx[ref] = physIdx
+		refType[ref] = refDef.Attrs["type"]
+	}
+
+	results := make([]string, len(doc.Data.Rows))
+	for r, row := range doc.Data.Rows {
+		env := make(map[string]formulaValue, len(refs))
+		for _, ref := range refs {
+			raw := cellAt(doc, row, refIdx[ref])
+			if isNullCell(doc, raw) {
+				env[ref] = fvNullVal()
+			} else {
+				env[ref] = formulaValueFromCell(raw, refType[ref])
+			}
+		}
+		v, err := node.eval(env)
+		if err != nil {
+			return fmt.Errorf("materialize %s: row %d: %w", name, r+1, err)
+		}
+		cell, err := formatFormulaResult(col.Attrs["type"], col.Attrs["format"], v, doc.Header.Null)
+		if err != nil {
+			return fmt.Errorf("materialize %s: row %d: %w", name, r+1, err)
+		}
+		results[r] = cell
+	}
+
+	for r := range doc.Data.Rows {
+		doc.Data.Rows[r] = append(doc.Data.Rows[r], results[r])
+	}
+	headerCell := col.Attrs["name"]
+	if t := col.Attrs["title"]; t != "" {
+		headerCell = t
+	}
+	doc.Data.HeaderRow = append(doc.Data.HeaderRow, headerCell)
+
+	// The #column line's place in the meta block SHOULD match its new
+	// physical position (append-at-end), which is also what the corrected
+	// declaration-order-as-physical-position logic (columnDefAt) relies on.
+	doc.Meta.Columns[idx].Attrs["materialized"] = "1"
+	moved := doc.Meta.Columns[idx]
+	doc.Meta.Columns = append(doc.Meta.Columns[:idx], doc.Meta.Columns[idx+1:]...)
+	doc.Meta.Columns = append(doc.Meta.Columns, moved)
+
+	return doc.SyncDerived()
+}
+
+// DematerializeColumn removes a materialized computed column's physical
+// data (the header cell and every row's field) and clears materialized=
+// back to absent. formula= is kept. Errors if name is not currently a
+// materialized formula column.
+func (doc *Document) DematerializeColumn(name string) error {
+	idx, col, ok := doc.columnByName(name)
+	if !ok {
+		return fmt.Errorf("unknown column: %s", name)
+	}
+	if col.Attrs["formula"] == "" {
+		return fmt.Errorf("column %s has no formula=, nothing to dematerialize", name)
+	}
+	if col.Attrs["materialized"] != "1" {
+		return fmt.Errorf("column %s is not materialized", name)
+	}
+	physIdx, err := doc.ColumnIndex(name)
+	if err != nil {
+		return err
+	}
+	if doc.Data.HasHeaderRow && physIdx < len(doc.Data.HeaderRow) {
+		doc.Data.HeaderRow = append(doc.Data.HeaderRow[:physIdx], doc.Data.HeaderRow[physIdx+1:]...)
+	}
+	for r, row := range doc.Data.Rows {
+		if physIdx < len(row) {
+			doc.Data.Rows[r] = append(row[:physIdx], row[physIdx+1:]...)
+		}
+	}
+	delete(doc.Meta.Columns[idx].Attrs, "materialized")
+	return doc.SyncDerived()
 }
 
 // RemoveAggregation removes a #% line. Returns false if not found.

@@ -37,7 +37,7 @@ func newRoot() *cobra.Command {
 	cfg := &config{}
 	root := &cobra.Command{
 		Use:   "excsv [flags] FILE <group> <command>",
-		Short: "CLI for ExCSV v0.4 (plain, sidecar, row ZIP, pack)",
+		Short: "CLI for ExCSV v0.5 (plain, sidecar, row ZIP, pack)",
 		Long: `Operate on an ExCSV document: put FILE first, then a command.
 
   excsv data.csv convert -o data.excsv
