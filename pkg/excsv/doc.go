@@ -5,11 +5,12 @@ delimiter-separated data; schema, units, summary statistics, SQL DDL/DQL, and
 an integrity checksum ride along as "#" comment lines that any existing CSV
 reader already skips.
 
-The package parses, validates, repairs, and serializes all four shapes the
+The package parses, validates, repairs, and serializes the text shapes the
 spec defines: plain/sidecar ".excsv" (data inline, or meta-only with
 reference= pointing at an untouched sibling CSV/TSV), row-oriented ZIP
-(".excsv.zip"), the multi-table columnar pack (".excsv.pack.zip"), and the
-JSON form (".excsv.json", a lossless bijection with the text form). See
+(".excsv.zip"), and the multi-table columnar pack (".excsv.pack.zip"). It
+also writes the JSON form (".excsv.json", a lossless bijection with the text
+form); reading JSON is not implemented. See
 [ParseFile] and [ParseBytes] for reading, [Document.SerializeCanonical],
 [Document.ExportJSON], and [Document.ExportCSVW] for writing,
 [Document.Validate] and [Document.Fix] for conformance checking and repair,
@@ -37,6 +38,16 @@ A #column may carry formula= to derive its value from other stored columns
 instead of storing it (v0.5). [Document.MaterializeColumn] evaluates the
 formula and writes the values in as an ordinary column; [Document.DematerializeColumn]
 reverses that, dropping the cached data but keeping formula=.
+
+# Charts
+
+A #chart line suggests how already-declared columns are meant to be viewed
+together (type=bar x=category y=amount, …); #chart-vega: carries a raw
+Vega-Lite spec instead. Charts are advisory and parsed into
+[MetaBlock].Charts; every channel is checked against the #column names, and
+the FAIL codes (missing type=/name=, unknown column, missing required
+channel, invalid Vega JSON) reject the file. See [Chart],
+[Document.ChartByName], and [Document.AddChart].
 
 # Error handling
 

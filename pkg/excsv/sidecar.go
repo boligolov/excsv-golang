@@ -108,8 +108,12 @@ func attachReferencedData(res *ParseResult, dataPath string, data []byte, opts P
 		return nil, err
 	}
 	collectMetaWarnings(res)
+	if err := enforceDeclarations(res); err != nil {
+		return nil, err
+	}
 	appendExtsvWarning(res, doc.Source.SidecarPath)
 	applyRowsMismatchWarning(res)
+	applyColumnsMismatchWarning(res, opts)
 	applyChecksumWarning(res, dataSection, true)
 	return res, nil
 }
@@ -131,6 +135,9 @@ func finishSidecarMeta(res *ParseResult, opts ParseOptions) (*ParseResult, error
 
 	if !opts.ResolveReference {
 		collectMetaWarnings(res)
+		if err := enforceDeclarations(res); err != nil {
+			return nil, err
+		}
 		return res, nil
 	}
 
@@ -143,6 +150,9 @@ func finishSidecarMeta(res *ParseResult, opts ParseOptions) (*ParseResult, error
 		if os.IsNotExist(err) {
 			res.warn(ErrSidecarReferenceNotFound, 1, "referenced file not found: "+ref)
 			collectMetaWarnings(res)
+			if err := enforceDeclarations(res); err != nil {
+				return nil, err
+			}
 			return res, nil
 		}
 		return nil, err

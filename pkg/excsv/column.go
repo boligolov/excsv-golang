@@ -155,6 +155,7 @@ func (doc *Document) RemoveColumn(name string) bool {
 	return found
 }
 
+// FormatColumnAttrs renders #column attributes in canonical order.
 func FormatColumnAttrs(attrs map[string]string) string {
 	return formatColumnAttrParts(attrs, formatColumnAttr, " ")
 }

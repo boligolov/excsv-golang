@@ -94,10 +94,12 @@ func joinCSVFields(fields []string, d Dialect) string {
 	return strings.Join(parts, string(d.Delim))
 }
 
+// JoinCSVFields renders one record in the given dialect, quoting as needed.
 func JoinCSVFields(fields []string, d Dialect) string {
 	return joinCSVFields(fields, d)
 }
 
+// SplitCSVFields parses one record in the given dialect.
 func SplitCSVFields(line string, d Dialect) ([]string, error) {
 	return splitCSVFields(line, d)
 }

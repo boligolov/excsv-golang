@@ -196,12 +196,14 @@ func parseChecksumField(s string) (string, string, error) {
 	return s[:i], s[i+1:], nil
 }
 
+// Dialect is the resolved delimiter and quoting of a document's data.
 type Dialect struct {
 	Delim        rune
 	Quote        rune
 	QuoteEnabled bool
 }
 
+// Dialect returns the header's resolved data dialect.
 func (h Header) Dialect() Dialect {
 	return Dialect{Delim: h.Delim, Quote: h.Quote, QuoteEnabled: h.QuoteEnabled}
 }

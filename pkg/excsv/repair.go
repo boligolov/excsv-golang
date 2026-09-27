@@ -441,6 +441,7 @@ func sniffColumnType(doc *Document, col int) string {
 	return "string"
 }
 
+// Fix runs Document.Fix on every table and resyncs the manifest.
 func (p *Pack) Fix(opts FixOptions) (FixReport, error) {
 	report := FixReport{DryRun: opts.DryRun}
 	if p == nil {

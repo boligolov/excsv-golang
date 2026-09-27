@@ -39,6 +39,7 @@ type FixReport struct {
 	DryRun  bool     `json:"dry_run"`
 }
 
+// OK reports whether fix found nothing to change.
 func (r FixReport) OK() bool { return len(r.Changed) == 0 }
 
 func (r *FixReport) mark(target string) {
@@ -186,11 +187,13 @@ func (doc *Document) applyFixTarget(target string, scope map[int]bool, now time.
 		return before != doc.Header.Fields["checksum"], nil
 
 	case FixRows:
-		before := doc.Header.Fields["rows"]
+		// rows= and columns= together declare the physical shape.
+		before := doc.Header.Fields["rows"] + "x" + doc.Header.Fields["columns"]
 		n := doc.RowCount()
 		doc.Header.Fields["rows"] = strconv.Itoa(n)
 		doc.Header.Rows = &n
-		return before != doc.Header.Fields["rows"], nil
+		doc.syncDeclaredColumns()
+		return before != doc.Header.Fields["rows"]+"x"+doc.Header.Fields["columns"], nil
 
 	case FixStamp:
 		if now.IsZero() {

@@ -103,10 +103,7 @@ func needsTargetFile(cmd *cobra.Command) bool {
 	case "version", "help", "completion":
 		return false
 	}
-	if cmd.Parent() == nil {
-		return false
-	}
-	return true
+	return cmd.Parent() != nil
 }
 
 func requireTargetFile(cmd *cobra.Command) {

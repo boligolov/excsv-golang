@@ -167,7 +167,7 @@ func TestImportDelimited_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(string(out)) != "#!excsv version="+excsv.CurrentVersion+" delim=comma quote=none" {
+	if strings.TrimSpace(string(out)) != "#!excsv version="+excsv.CurrentVersion+" delim=comma quote=none rows=0" {
 		t.Fatalf("got %q", string(out))
 	}
 }

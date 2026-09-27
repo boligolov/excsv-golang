@@ -33,6 +33,7 @@ type ValidateReport struct {
 	WithData bool      `json:"with_data"`
 }
 
+// OK reports whether validation found nothing.
 func (r ValidateReport) OK() bool { return len(r.Findings) == 0 }
 
 // RepairCommand returns the `fix --only …` invocation covering the repairable
@@ -64,7 +65,7 @@ var knownColumnTypes = map[string]bool{
 // --with-data validate pass rather than the default schema-only pass.
 func IsDataLevelWarning(kind ErrorKind) bool {
 	switch kind {
-	case ErrRowsMismatch, ErrChecksumMismatch, ErrSidecarChecksumMismatch, ErrDefaultWithNulls:
+	case ErrRowsMismatch, ErrColumnsMismatch, ErrChecksumMismatch, ErrSidecarChecksumMismatch, ErrDefaultWithNulls:
 		return true
 	default:
 		return false
@@ -107,6 +108,12 @@ func (doc *Document) Validate(opts ValidateOptions) ValidateReport {
 	if doc.Header.Rows != nil && doc.RowCount() != *doc.Header.Rows {
 		add(newIssue(ErrRowsMismatch, 1,
 			fmt.Sprintf("rows=%d but the data section has %d rows", *doc.Header.Rows, doc.RowCount())), "rows")
+	}
+	if raw, ok := doc.Header.Fields["columns"]; ok {
+		if want, err := strconv.Atoi(strings.TrimSpace(raw)); err != nil || want != doc.PhysicalColumnCount() {
+			add(newIssue(ErrColumnsMismatch, 1,
+				fmt.Sprintf("columns=%s but the document has %d physical columns", raw, doc.PhysicalColumnCount())), "rows")
+		}
 	}
 	if doc.Header.Checksum != nil {
 		if err := verifyChecksum(doc.SerializeDataSection(), doc.Header.Checksum); err != nil {
@@ -183,6 +190,7 @@ func (doc *Document) checkDeclarations() []Issue {
 		}
 	}
 	issues = append(issues, doc.checkComputedColumns()...)
+	issues = append(issues, doc.checkCharts()...)
 	return issues
 }
 

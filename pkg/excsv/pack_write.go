@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// PackFromDocument builds a single-table pack from a row document.
 func PackFromDocument(doc *Document, tableName string) *Pack {
 	if tableName == "" {
 		tableName = "table"
@@ -110,6 +111,7 @@ func cloneDocumentMeta(doc *Document) *Document {
 	return out
 }
 
+// AddTable appends doc as a new table and updates the manifest.
 func (p *Pack) AddTable(doc *Document, name string) {
 	if p.Manifest != nil && len(p.Tables) >= 1 {
 		delete(p.Manifest.Header.Fields, "single-table")
@@ -119,6 +121,7 @@ func (p *Pack) AddTable(doc *Document, name string) {
 	p.syncManifest()
 }
 
+// DropTable removes the named table.
 func (p *Pack) DropTable(name string) error {
 	idx := -1
 	for i := range p.Tables {
@@ -176,6 +179,8 @@ func (p *Pack) syncManifest() {
 	}
 }
 
+// Serialize writes the pack as .excsv.pack.zip bytes, finalizing the
+// manifest's #table sizes and original-size= first.
 func (p *Pack) Serialize() ([]byte, error) {
 	p.syncManifest()
 	var buf bytes.Buffer
@@ -251,6 +256,10 @@ func (p *Pack) Serialize() ([]byte, error) {
 	fixed := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for _, e := range entries {
 		h := &zip.FileHeader{Name: e.name, Method: zip.Deflate}
+		// FileHeader.Modified would also write an extended-timestamp extra
+		// field and change the archive bytes; the fixed DOS time keeps pack
+		// output byte-reproducible.
+		//lint:ignore SA1019 deliberate, see above
 		h.SetModTime(fixed)
 		w, err := zw.CreateHeader(h)
 		if err != nil {
@@ -291,6 +300,8 @@ func packComment(manifest []byte) []byte {
 	return []byte(c)
 }
 
+// SyncFromDocument copies an edited table document (header, meta, data)
+// back into the table's header and column values.
 func (t *PackTable) SyncFromDocument(doc *Document) {
 	if t == nil || doc == nil {
 		return
@@ -328,6 +339,7 @@ func (t *PackTable) SyncFromDocument(doc *Document) {
 	t.Header.Header.Fields["layout"] = "columnar"
 }
 
+// ExtractDocument returns the table as a standalone row document.
 func (t *PackTable) ExtractDocument() *Document {
 	doc := cloneDocumentMeta(t.Header)
 	delete(doc.Header.Fields, "layout")

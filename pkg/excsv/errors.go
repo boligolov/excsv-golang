@@ -2,8 +2,13 @@ package excsv
 
 import "fmt"
 
+// ErrorKind is a code from the spec's error registry
+// (implementation/error-handling.md), e.g. "header_missing_version".
 type ErrorKind string
 
+// Registry codes. Whether a code is FAIL or WARN is the spec's call: FAIL
+// codes surface as a *ParseError, WARN codes as ParseResult.Warnings or
+// validate findings.
 const (
 	ErrHeaderMissingVersion      ErrorKind = "header_missing_version"
 	ErrHeaderMalformedKV         ErrorKind = "header_malformed_kv"
@@ -11,6 +16,7 @@ const (
 	ErrHeaderUnclosedQuote       ErrorKind = "header_unclosed_quote"
 	ErrHeaderInvalidValue        ErrorKind = "header_invalid_value"
 	ErrUnknownVersion            ErrorKind = "unknown_version"
+	ErrHeaderMissingRows         ErrorKind = "header_missing_rows"
 	ErrColumnMissingName         ErrorKind = "column_missing_name"
 	ErrColumnMissingIndex        ErrorKind = "column_missing_index"
 	ErrColumnTitleHeaderMismatch ErrorKind = "column_title_header_mismatch"
@@ -65,6 +71,7 @@ const (
 	ErrPackSectionBoundary       ErrorKind = "pack_section_boundary_mismatch"
 	ErrOriginalSizeOnPlain       ErrorKind = "original_size_on_plain"
 	ErrRowsMismatch              ErrorKind = "rows_mismatch"
+	ErrColumnsMismatch           ErrorKind = "columns_mismatch"
 	ErrSidecarHasDataSection     ErrorKind = "sidecar_has_data_section"
 	ErrSidecarMissingReference   ErrorKind = "sidecar_missing_reference"
 	ErrSidecarReferenceNotFound  ErrorKind = "sidecar_reference_not_found"
@@ -74,6 +81,7 @@ const (
 	ErrReferenceOnInline         ErrorKind = "reference_on_inline"
 
 	// Computed columns (formula=/materialized=), added in v0.5.
+
 	ErrFormulaReferencesComputed    ErrorKind = "formula_references_computed"
 	ErrFormulaUnknownReference      ErrorKind = "formula_unknown_reference"
 	ErrFormulaParseError            ErrorKind = "formula_parse_error"
@@ -82,11 +90,38 @@ const (
 	ErrComputedMaterializedMismatch ErrorKind = "computed_materialized_mismatch"
 	ErrComputedDefaultIgnored       ErrorKind = "computed_default_ignored"
 	ErrComputedStale                ErrorKind = "computed_stale"
+
+	// Charts (#chart / #chart-<engine>:), added after v0.5.
+
+	ErrChartMissingType            ErrorKind = "chart_missing_type"
+	ErrChartMissingName            ErrorKind = "chart_missing_name"
+	ErrChartUnknownColumn          ErrorKind = "chart_unknown_column"
+	ErrChartMissingRequiredChannel ErrorKind = "chart_missing_required_channel"
+	ErrChartVegaInvalidJSON        ErrorKind = "chart_vega_invalid_json"
+	ErrChartDuplicateName          ErrorKind = "chart_duplicate_name"
+	ErrChartOnManifest             ErrorKind = "chart_on_manifest"
+	ErrChartUnknownType            ErrorKind = "chart_unknown_type"
+	ErrChartUnknownChannel         ErrorKind = "chart_unknown_channel"
 )
+
+// isFailKind reports whether a code found by a declaration check (computed
+// columns, charts) is FAIL severity in the spec's registry, as opposed to WARN.
+func isFailKind(kind ErrorKind) bool {
+	switch kind {
+	case ErrFormulaReferencesComputed, ErrFormulaUnknownReference, ErrFormulaParseError,
+		ErrFormulaIndexForbidden, ErrFormulaRequiresHeader, ErrComputedMaterializedMismatch,
+		ErrChartMissingType, ErrChartMissingName, ErrChartUnknownColumn,
+		ErrChartMissingRequiredChannel, ErrChartVegaInvalidJSON:
+		return true
+	}
+	return false
+}
 
 // ErrSidecarDelimExtMismatch is the old name; fixtures use extsv_delim_mismatch.
 const ErrSidecarDelimExtMismatch = ErrExtsvDelimMismatch
 
+// Issue is one registry finding at a 1-based source line (0 when the
+// finding is not tied to a line).
 type Issue struct {
 	Kind    ErrorKind `json:"kind"`
 	Message string    `json:"message"`
@@ -100,6 +135,7 @@ func (i Issue) Error() string {
 	return fmt.Sprintf("%s: %s", i.Kind, i.Message)
 }
 
+// ParseError is returned when a document hits a FAIL-severity code.
 type ParseError struct {
 	Issue Issue
 }

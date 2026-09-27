@@ -182,7 +182,3 @@ func isReservedMetaPrefix(line string) bool {
 func validUTF8(data []byte) bool {
 	return utf8.Valid(data)
 }
-
-func encodingMismatch(data []byte, encoding string) bool {
-	return encodingIssue(data, encoding) != nil && encodingIssue(data, encoding).Kind == ErrEncodingMismatch
-}

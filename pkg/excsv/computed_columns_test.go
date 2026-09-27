@@ -1,6 +1,7 @@
 package excsv_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -143,18 +144,14 @@ func TestFormulaValidationErrorCodes(t *testing.T) {
 			want: excsv.ErrFormulaParseError,
 		},
 	}
+	// All three are FAIL in the registry: a conforming reader rejects the
+	// file at parse time rather than reporting it from validate.
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			doc := parseComputedDoc(t, tc.src)
-			report := doc.Validate(excsv.ValidateOptions{})
-			found := false
-			for _, f := range report.Findings {
-				if f.Kind == tc.want {
-					found = true
-				}
-			}
-			if !found {
-				t.Fatalf("findings=%+v, want %s", report.Findings, tc.want)
+			_, err := excsv.ParseBytes([]byte(tc.src), excsv.StrictOptions())
+			var pe *excsv.ParseError
+			if !errors.As(err, &pe) || pe.Issue.Kind != tc.want {
+				t.Fatalf("parse err = %v, want %s", err, tc.want)
 			}
 		})
 	}

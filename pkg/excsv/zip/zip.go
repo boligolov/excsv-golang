@@ -13,8 +13,10 @@ import (
 	"unicode/utf8"
 )
 
+// ErrorKind is a ZIP-container code from the spec's error registry.
 type ErrorKind string
 
+// ZIP-container registry codes.
 const (
 	ErrPrimaryNotFirst        ErrorKind = "zip_primary_not_first"
 	ErrEncrypted              ErrorKind = "zip_encrypted"
@@ -27,6 +29,7 @@ const (
 	ErrPrimaryBadName         ErrorKind = "zip_primary_bad_name"
 )
 
+// ZipError is a container-level failure; Kind maps onto the excsv registry.
 type ZipError struct {
 	Kind    ErrorKind
 	Message string
@@ -34,6 +37,8 @@ type ZipError struct {
 
 func (e *ZipError) Error() string { return string(e.Kind) + ": " + e.Message }
 
+// InspectResult describes a row ZIP without decompressing its primary
+// entry: the archive comment and the located primary entry.
 type InspectResult struct {
 	Comment               string
 	PrimaryName           string
@@ -45,6 +50,7 @@ type InspectResult struct {
 	primary               *zip.File
 }
 
+// ExtractResult is a row ZIP with its primary entry decompressed.
 type ExtractResult struct {
 	Inner            []byte
 	Comment          string
@@ -109,6 +115,7 @@ var supportedMethods = map[uint16]bool{
 	12:          true, // bzip2
 }
 
+// Extract decompresses the primary entry of an unencrypted row ZIP.
 func Extract(archivePath string, data []byte) (*ExtractResult, error) {
 	return ExtractWithPassword(archivePath, data, "")
 }
@@ -195,6 +202,8 @@ func locatePrimary(archivePath string, files []*zip.File) (*zip.File, int, error
 	return nil, -1, &ZipError{Kind: ErrPrimaryBadName, Message: primary.Name}
 }
 
+// Wrap builds an unencrypted row ZIP holding inner as its primary entry,
+// with comment as the archive comment.
 func Wrap(inner []byte, entryName string, comment string) ([]byte, error) {
 	return WrapWithPassword(inner, entryName, comment, "")
 }
@@ -203,6 +212,9 @@ func wrapPlain(patched []byte, entryName, comment string) ([]byte, error) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	h := &zip.FileHeader{Name: entryName, Method: zip.Deflate}
+	// FileHeader.Modified would also write an extended-timestamp extra field
+	// and change the archive bytes; a fixed DOS time keeps output reproducible.
+	//lint:ignore SA1019 deliberate, see above
 	h.SetModTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	w, err := zw.CreateHeader(h)
 	if err != nil {

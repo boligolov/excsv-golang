@@ -4,6 +4,13 @@ Reference index for building **excsv-cli** (Go). Use the upstream [boligolov/exc
 
 Upstream spec is **v0.5**. This repo implements the **row family** (plain + zip) and **pack family** (`.excsv.pack.zip`).
 
+## Post-v0.5 additions (upstream, version stays 0.5)
+
+| Area | Change |
+| --- | --- |
+| **Charts** | `#chart type=<mark> name=<id> <channel>=<column> …` (compact form) and `#chart-vega: <Vega-Lite JSON>` (escape hatch). Advisory, per-table; every channel MUST name a declared `#column` (`count()` is a reserved literal). Recommended meta order is now `#@`, `#column`, `#chart`, `#$`, `#%`. JSON mirror: a `charts` array. Normative spec: [`implementation/charts.md`](downloaded/implementation/charts.md). Codes: [`error-handling.md#charts`](downloaded/implementation/error-handling.md#charts). Fixtures: `plain/valid/071–077`, `plain/invalid/040–044`. Implemented in `pkg/excsv` (`chart.go`); the `excsv chart` renderer (feature N7) is not. |
+| **Fixture corpus** | New fixtures exercise rules that were already in the v0.5 spec: `rows=` is **MUST** (`header_missing_rows`, checked after every more specific defect, v0.5+ headers only), `columns=` vs physical width (`columns_mismatch`), computed-column FAIL codes at parse time, and manifest `columns:` counting physical (non-virtual) columns only. `fixtures.yaml` is now two YAML documents (`error_kinds`, then the fixture list). |
+
 ## v0.5 changes (vs v0.4)
 
 | Area | Change |
@@ -50,7 +57,7 @@ https://raw.githubusercontent.com/boligolov/excsv/master/fixtures/fixtures.yaml
 
 ### `docs/implementation/*.md` — normative spec (highest authority)
 
-RFC 2119 parser/writer rules, error-code registry, ZIP/pack invariants. **If behaviour is not defined here, do not invent it.** Start at [`implementation/README.md`](downloaded/implementation/README.md). Error codes live in `error-handling.md`. Column types/constraints: `columns.md`. Aggregations: `aggregations.md`. JSON bijection: `json.md`.
+RFC 2119 parser/writer rules, error-code registry, ZIP/pack invariants. **If behaviour is not defined here, do not invent it.** Start at [`implementation/README.md`](downloaded/implementation/README.md). Error codes live in `error-handling.md`. Column types/constraints: `columns.md`. Aggregations: `aggregations.md`. Charts: `charts.md`. JSON bijection: `json.md`.
 
 When the human guide (`docs/*.md`) and the implementation spec disagree, **implementation wins**.
 

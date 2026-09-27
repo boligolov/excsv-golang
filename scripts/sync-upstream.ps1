@@ -21,6 +21,7 @@ $FixtureBase = "$UpstreamBase/fixtures"
 
 $GuideFiles = @(
     'aggregations.md',
+    'charts.md',
     'checksum.md',
     'columns.md',
     'data-section.md',
@@ -41,6 +42,7 @@ $GuideFiles = @(
 $ImplementationFiles = @(
     'README.md',
     'aggregations.md',
+    'charts.md',
     'checksum.md',
     'columns.md',
     'data-section.md',
@@ -147,7 +149,13 @@ if ($syncFixtures) {
 
     Write-Host 'Generating zip fixtures from upstream generator...'
     $specDir = Join-Path $env:TEMP 'excsv-spec-sync'
-    if (-not (Test-Path (Join-Path $specDir '.git'))) {
+    # Reusing an old clone would regenerate from stale generators, so always
+    # bring the scratch clone to the current upstream master.
+    if (Test-Path (Join-Path $specDir '.git')) {
+        git -C $specDir fetch --depth 1 origin master
+        git -C $specDir reset --hard FETCH_HEAD
+    }
+    else {
         if (Test-Path $specDir) { Remove-Item -Recurse -Force $specDir }
         git clone --depth 1 https://github.com/boligolov/excsv.git $specDir
     }

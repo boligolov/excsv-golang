@@ -13,6 +13,7 @@ import (
 type config struct {
 	strict             bool
 	lenient            bool
+	repairing          bool // fix: read tolerantly what fix exists to repair (header_missing_rows)
 	jsonOut            bool
 	cleanHumanComments bool
 	expectProfile      string
@@ -24,7 +25,7 @@ type config struct {
 
 func (c config) parseOpts() excsv.ParseOptions {
 	opts := excsv.StrictOptions()
-	if c.lenient {
+	if c.lenient || c.repairing {
 		opts.Strict = false
 	}
 	opts.ClearHumanComments = c.cleanHumanComments

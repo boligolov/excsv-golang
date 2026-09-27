@@ -249,16 +249,27 @@ func runValidate(cfg *config, withData bool, columns []string) {
 	}
 
 	report := excsv.ValidateReport{WithData: withData}
+	// Parse warnings and the reporter's own declaration checks overlap
+	// (e.g. #chart warnings); report each finding once.
+	seen := map[excsv.Issue]bool{}
+	add := func(f excsv.Finding) {
+		if seen[f.Issue] {
+			return
+		}
+		seen[f.Issue] = true
+		report.Findings = append(report.Findings, f)
+	}
 	for _, w := range res.Warnings {
 		if !withData && excsv.IsDataLevelWarning(w.Kind) {
 			continue
 		}
-		report.Findings = append(report.Findings, excsv.Finding{Issue: w})
+		add(excsv.Finding{Issue: w})
 	}
 	opts := excsv.ValidateOptions{WithData: withData, Columns: columns}
 	for _, doc := range validationTargets(cfg, res) {
-		sub := doc.Validate(opts)
-		report.Findings = append(report.Findings, sub.Findings...)
+		for _, f := range doc.Validate(opts).Findings {
+			add(f)
+		}
 	}
 
 	if cfg.jsonOut {
@@ -335,6 +346,7 @@ func newFixCmd(cfg *config) *cobra.Command {
 			if err != nil {
 				exitUserErr(err.Error())
 			}
+			cfg.repairing = true
 			runFix(cfg, excsv.FixOptions{Only: targets, Columns: columns, DryRun: dryRun})
 		},
 	}

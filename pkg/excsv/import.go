@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 )
 
+// ImportOptions configures ImportDelimited.
 type ImportOptions struct {
 	// DelimName / QuoteName describe the output ExCSV header (and inline data encoding).
 	// Input bytes are always parsed using detected dialect (sniff + SourcePath hint).
@@ -19,6 +20,8 @@ type ImportOptions struct {
 	Null      string
 	// NoChecksum opts out of checksum=, which is emitted by default.
 	NoChecksum bool
+	// Strict rejects rows whose field count differs from the header's
+	// instead of padding/trimming them.
 	Strict     bool
 	Sidecar    bool
 	Reference  string // sidecar reference= path; default basename of SourcePath
@@ -40,11 +43,14 @@ type ColumnAttr struct {
 	Value  string
 }
 
+// ImportResult is the document ImportDelimited built plus its warnings.
 type ImportResult struct {
 	Doc      *Document
 	Warnings []Issue
 }
 
+// ImportDelimited converts plain CSV/TSV bytes into an ExCSV document,
+// sniffing the input dialect and inferring #column types.
 func ImportDelimited(data []byte, opts ImportOptions) (*ImportResult, error) {
 	data = stripUTF8BOM(data)
 	if len(data) > 0 && !utf8.Valid(data) {

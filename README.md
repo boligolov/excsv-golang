@@ -252,7 +252,8 @@ docs/downloaded/     Spec hub + guide/ + implementation/ (gitignored; sync from 
 | 2 | Row `.excsv.zip` read/write, zip CLI, password | Done |
 | 3 | Pack, grouped CLI (v0.0.2+), validate/fix, export json/csvw, rich `info` | Done |
 | 4 | Computed columns (v0.5): `formula=`/`materialized=`, `column materialize`/`dematerialize` | Done |
-| 5+ | Streaming, diff, DDL generation from `#column` | Not yet |
+| 5 | Charts: `#chart` / `#chart-vega:` parse, validate, round-trip, JSON `charts` (library); `excsv chart` renderer | Library done; CLI not yet |
+| 6+ | Streaming, diff, DDL generation from `#column` | Not yet |
 
 ## License
 

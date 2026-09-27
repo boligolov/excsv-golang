@@ -296,3 +296,90 @@ func applyRowsMismatchWarning(res *ParseResult) {
 		res.warn(ErrRowsMismatch, 1, "rows= does not match data row count")
 	}
 }
+
+// enforceDeclarations applies the declaration checks whose FAIL codes a
+// conforming reader MUST reject on (computed columns, charts), and surfaces
+// the chart WARN codes. computed_materialized_mismatch needs the physical
+// data, so it only runs once a data section has actually been read — a
+// metadata-only read (ZIP comment peek, unresolved sidecar, pack table
+// header) has nothing to compare materialized= against.
+func enforceDeclarations(res *ParseResult) error {
+	doc := res.Doc
+	for _, iss := range doc.checkComputedColumns() {
+		if isFailKind(iss.Kind) {
+			return &ParseError{Issue: iss}
+		}
+	}
+	if doc.Data.HasHeaderRow || len(doc.Data.Rows) > 0 {
+		if issues := doc.checkComputedMaterialization(); len(issues) > 0 {
+			return &ParseError{Issue: issues[0]}
+		}
+	}
+	var warns []Issue
+	for _, iss := range doc.checkCharts() {
+		if isFailKind(iss.Kind) {
+			return &ParseError{Issue: iss}
+		}
+		warns = append(warns, iss)
+	}
+	res.Warnings = append(res.Warnings, warns...)
+	return nil
+}
+
+// PhysicalColumnCount is the document's physical width: stored plus
+// materialized computed columns. It comes from the data (header row, else
+// first row) when a data section was read, otherwise from the #column
+// declarations. Virtual computed columns never count.
+func (doc *Document) PhysicalColumnCount() int {
+	if w := physicalWidth(doc); w > 0 {
+		return w
+	}
+	n := 0
+	for _, col := range doc.Meta.Columns {
+		if !isVirtualColumn(col) {
+			n++
+		}
+	}
+	return n
+}
+
+// applyColumnsMismatchWarning compares a declared columns= against the
+// physical width. Pack headers are covered by pack_column_count_mismatch.
+func applyColumnsMismatchWarning(res *ParseResult, opts ParseOptions) {
+	if opts.PackRole != "" {
+		return
+	}
+	raw, ok := res.Doc.Header.Fields["columns"]
+	if !ok {
+		return
+	}
+	want, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		res.warn(ErrColumnsMismatch, 1, "columns="+raw+" is not a column count")
+		return
+	}
+	if got := res.Doc.PhysicalColumnCount(); got > 0 && got != want {
+		res.warn(ErrColumnsMismatch, 1, "columns="+raw+" but the document has "+strconv.Itoa(got)+" physical columns")
+	}
+}
+
+// rowsOptionalVersions are the versions in which rows= was still MAY; it
+// became MUST in 0.5.
+var rowsOptionalVersions = map[string]bool{"0.2": true, "0.3": true, "0.4": true}
+
+// checkRowsDeclared enforces rows= being present on every v0.5+ #!excsv
+// header except a pack manifest, which has no single row count. A strict read
+// fails (header_missing_rows); a lenient one only warns, so that
+// `fix --only rows` can still open the file it is meant to repair.
+func checkRowsDeclared(res *ParseResult, opts ParseOptions) error {
+	h := res.Doc.Header
+	if !h.HasMagicLine || h.Rows != nil || rowsOptionalVersions[h.Version] ||
+		opts.PackRole == "manifest" || h.Fields["layout"] == "pack" {
+		return nil
+	}
+	if opts.Strict {
+		return fail(ErrHeaderMissingRows, 1, "header lacks rows=")
+	}
+	res.warn(ErrHeaderMissingRows, 1, "header lacks rows=")
+	return nil
+}

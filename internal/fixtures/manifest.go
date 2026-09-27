@@ -39,6 +39,19 @@ type Expect struct {
 	FKCount   *int              `yaml:"fk_count"`
 	SQL       *SQLExpect        `yaml:"sql"`
 	Comment   *CommentExpect    `yaml:"comment"`
+	Computed  *ComputedExpect   `yaml:"computed"`
+	Charts    *ChartsExpect     `yaml:"charts"`
+}
+
+type ComputedExpect struct {
+	Virtual      []string `yaml:"virtual"`
+	Materialized []string `yaml:"materialized"`
+}
+
+type ChartsExpect struct {
+	Count   *int     `yaml:"count"`
+	Types   []string `yaml:"types"`
+	Engines []string `yaml:"engines"`
 }
 
 type TableExpect struct {
@@ -98,9 +111,6 @@ func AssertExpectation(t *testing.T, fx Fixture, res *excsv.ParseResult, err err
 		doc := res.Doc
 		for k, v := range fx.Expect.Header {
 			got := headerField(doc, k)
-			if k == "version" && v != got && staleGeneratedVersion(got) {
-				continue // generated pack/zip fixtures upstream lag the manifest's declared version
-			}
 			if got != v {
 				t.Fatalf("header[%q]: got %q want %q", k, got, v)
 			}
@@ -113,8 +123,18 @@ func AssertExpectation(t *testing.T, fx Fixture, res *excsv.ParseResult, err err
 		if fx.Expect.Rows != nil && doc.RowCount() != *fx.Expect.Rows {
 			t.Fatalf("rows: got %d want %d", doc.RowCount(), *fx.Expect.Rows)
 		}
-		if fx.Expect.Columns != nil && len(doc.Meta.Columns) != *fx.Expect.Columns {
-			t.Fatalf("columns: got %d want %d", len(doc.Meta.Columns), *fx.Expect.Columns)
+		// columns counts physical declarations: a virtual computed column
+		// (formula=, not materialized) has no slot in the data.
+		if fx.Expect.Columns != nil {
+			if got := physicalColumnDecls(doc); got != *fx.Expect.Columns {
+				t.Fatalf("columns: got %d want %d", got, *fx.Expect.Columns)
+			}
+		}
+		if fx.Expect.Computed != nil {
+			assertComputed(t, tableDoc(res, fx), fx.Expect.Computed)
+		}
+		if fx.Expect.Charts != nil {
+			assertCharts(t, doc, fx.Expect.Charts)
 		}
 		if fx.Expect.SQL != nil {
 			ddl, dql := countSQL(doc)
@@ -189,16 +209,7 @@ func AssertExpectation(t *testing.T, fx Fixture, res *excsv.ParseResult, err err
 			c := doc.Source.Comment
 			if fx.Expect.Comment.StartsWith != "" {
 				want := fx.Expect.Comment.StartsWith
-				ok := strings.HasPrefix(c, want)
-				if !ok && strings.Contains(want, "version=0.5") {
-					for _, stale := range staleGeneratedVersions {
-						if ok {
-							break
-						}
-						ok = strings.HasPrefix(c, strings.Replace(want, "version=0.5", "version="+stale, 1))
-					}
-				}
-				if !ok {
+				if !strings.HasPrefix(c, want) {
 					t.Fatalf("comment starts_with: got %q", c)
 				}
 			}
@@ -230,24 +241,6 @@ func AssertExpectation(t *testing.T, fx Fixture, res *excsv.ParseResult, err err
 	if string(pe.Issue.Kind) != fx.Expect.ErrorKind {
 		t.Fatalf("error_kind: got %q want %q (%s)", pe.Issue.Kind, fx.Expect.ErrorKind, pe.Issue.Message)
 	}
-}
-
-// staleGeneratedVersions are versions the pack/zip fixture *generator*
-// upstream hasn't been re-run for yet, even though fixtures.yaml already
-// declares a newer spec version. Confirmed against boligolov/excsv: the
-// committed pack fixture .zip bytes still carry version=0.3 while
-// fixtures.yaml expects 0.5 (checked 2026-09-06) — an upstream corpus lag,
-// not a excsv-golang defect. See UpstreamFixtureBugs for the same posture
-// applied per-fixture-ID instead of per-version.
-var staleGeneratedVersions = []string{"0.3", "0.4"}
-
-func staleGeneratedVersion(got string) bool {
-	for _, v := range staleGeneratedVersions {
-		if got == v {
-			return true
-		}
-	}
-	return false
 }
 
 func headerField(doc *excsv.Document, key string) string {
@@ -329,13 +322,9 @@ func FilterRF(m *Manifest) []Fixture {
 
 // UpstreamFixtureBugs are files whose bytes/yaml disagree with the spec.
 // The parser follows the spec; skip until boligolov/excsv fixes the corpus.
-var UpstreamFixtureBugs = map[string]string{
-	"plain/valid/039_sidecar_checksum_pair.excsv":               "declared checksum does not match sibling CSV",
-	"plain/invalid/024_invalid_utf8_byte_sequence.excsv":        "file contains U+FFFD (valid UTF-8), not an invalid sequence",
-	"pack/invalid/006_section_partition_error.excsv.pack.zip":   "generator corrupts 04.col but files are named 4.col",
-	"pack/invalid/007_section_boundary_mismatch.excsv.pack.zip": "generator corrupts 04.col/02.col but pad width is 1",
-	"zip/valid/013_comment_header_disagree.excsv.zip":           "generator injects the disagreement via replace(\"version=0.4\", \"version=0.2\"), a no-op now that the derived plain fixture says version=0.5 — comment and header end up byte-identical, so there is genuinely nothing to warn about",
-}
+// Empty since upstream 9c61e8e fixed all known cases (039, 024, 022 CRLF,
+// zip 013, pack 006/007).
+var UpstreamFixtureBugs = map[string]string{}
 
 func packDialects(p *excsv.Pack) []string {
 	if p == nil {
@@ -374,4 +363,71 @@ func MustLoad(path string) *Manifest {
 		panic(fmt.Sprintf("load fixtures: %v", err))
 	}
 	return m
+}
+
+func physicalColumnDecls(doc *excsv.Document) int {
+	n := 0
+	for _, col := range doc.Meta.Columns {
+		if !col.IsVirtual() {
+			n++
+		}
+	}
+	return n
+}
+
+// tableDoc is the document whose schema a fixture's expectations describe:
+// the named (or only) pack table for a pack, otherwise the document itself.
+func tableDoc(res *excsv.ParseResult, fx Fixture) *excsv.Document {
+	if res.Pack == nil {
+		return res.Doc
+	}
+	if fx.Expect.Table != nil && fx.Expect.Table.Name != "" {
+		if pt, err := res.Pack.Table(fx.Expect.Table.Name); err == nil {
+			return pt.Document()
+		}
+	}
+	if pt := res.Pack.DefaultTable(); pt != nil {
+		return pt.Document()
+	}
+	return res.Doc
+}
+
+func assertComputed(t *testing.T, doc *excsv.Document, want *ComputedExpect) {
+	t.Helper()
+	var virtual, materialized []string
+	for _, col := range doc.Meta.Columns {
+		switch {
+		case col.IsVirtual():
+			virtual = append(virtual, col.Attrs["name"])
+		case col.IsComputed():
+			materialized = append(materialized, col.Attrs["name"])
+		}
+	}
+	if want.Virtual != nil && !equalStringSlice(virtual, want.Virtual) {
+		t.Fatalf("computed.virtual: got %v want %v", virtual, want.Virtual)
+	}
+	if want.Materialized != nil && !equalStringSlice(materialized, want.Materialized) {
+		t.Fatalf("computed.materialized: got %v want %v", materialized, want.Materialized)
+	}
+}
+
+func assertCharts(t *testing.T, doc *excsv.Document, want *ChartsExpect) {
+	t.Helper()
+	if want.Count != nil && len(doc.Meta.Charts) != *want.Count {
+		t.Fatalf("charts.count: got %d want %d", len(doc.Meta.Charts), *want.Count)
+	}
+	var types, engines []string
+	for _, c := range doc.Meta.Charts {
+		if c.IsEscape() {
+			engines = append(engines, c.Engine)
+		} else {
+			types = append(types, c.Type())
+		}
+	}
+	if want.Types != nil && !equalStringSlice(types, want.Types) {
+		t.Fatalf("charts.types: got %v want %v", types, want.Types)
+	}
+	if want.Engines != nil && !equalStringSlice(engines, want.Engines) {
+		t.Fatalf("charts.engines: got %v want %v", engines, want.Engines)
+	}
 }

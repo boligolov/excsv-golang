@@ -183,6 +183,13 @@ func isVirtualColumn(col ColumnDef) bool {
 	return col.Attrs["materialized"] != "1"
 }
 
+// IsComputed reports whether the column declares formula=.
+func (c ColumnDef) IsComputed() bool { return c.Attrs["formula"] != "" }
+
+// IsVirtual reports whether the column is a computed column that is not
+// materialized: it has no header cell, no field in any row, no .col file.
+func (c ColumnDef) IsVirtual() bool { return isVirtualColumn(c) }
+
 func readTableColumns(files map[string][]byte, dir string, names []string, expectSectioned bool) ([][]string, []string, bool, error) {
 	type sec struct {
 		start int
@@ -273,9 +280,7 @@ func colLines(b []byte) []string {
 	if s == "" {
 		return nil
 	}
-	if strings.HasSuffix(s, "\n") {
-		s = s[:len(s)-1]
-	}
+	s = strings.TrimSuffix(s, "\n")
 	if s == "" {
 		return []string{""}
 	}

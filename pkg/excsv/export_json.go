@@ -115,6 +115,9 @@ func (doc *Document) appendTableJSON(into *orderedJSON) {
 	if cols := doc.jsonColumns(); len(cols) > 0 {
 		into.set("columns", cols)
 	}
+	if charts := doc.jsonCharts(); len(charts) > 0 {
+		into.set("charts", charts)
+	}
 	if sql := doc.jsonSQL(); sql.len() > 0 {
 		into.set("sql", sql)
 	}
@@ -122,6 +125,9 @@ func (doc *Document) appendTableJSON(into *orderedJSON) {
 		into.set("checksum", cs)
 	}
 	into.set("rows", doc.DeclaredOrCountedRows())
+	if n, ok := parseAttrInt(doc.Header.Fields["columns"]); ok {
+		into.set("column_count", n)
+	}
 	if agg := doc.jsonAggregates(); agg.len() > 0 {
 		into.set("aggregates", agg)
 	}
@@ -234,6 +240,70 @@ func jsonColumnAttr(key, value, columnType string) any {
 		}
 	}
 	return value
+}
+
+// jsonCharts mirrors #chart lines (charts.md § JSON mirror): a compact line
+// becomes a flat object of its attributes, a #chart-<engine>: line becomes
+// {"<engine>": <parsed payload>}. File order is preserved.
+func (doc *Document) jsonCharts() []any {
+	if len(doc.Meta.Charts) == 0 {
+		return nil
+	}
+	out := make([]any, 0, len(doc.Meta.Charts))
+	for _, c := range doc.Meta.Charts {
+		entry := newOrderedJSON()
+		if c.IsEscape() {
+			var payload any = c.Payload
+			if json.Valid([]byte(c.Payload)) {
+				payload = json.RawMessage(c.Payload)
+			}
+			entry.set(c.Engine, payload)
+		} else {
+			for _, kv := range c.Attrs {
+				entry.set(kv.Key, jsonChartAttr(kv))
+			}
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// jsonChartAttr types a compact #chart attribute per schema/excsv.schema.json.
+func jsonChartAttr(kv KV) any {
+	switch kv.Key {
+	case "tooltip":
+		if refs := chartChannelValues(kv); len(refs) > 1 {
+			out := make([]any, len(refs))
+			for i, r := range refs {
+				out[i] = r
+			}
+			return out
+		}
+	case "bin":
+		// bin=1 switches binning on; any other count is the bin count.
+		if kv.Value == "1" {
+			return true
+		}
+		if n, ok := parseAttrInt(kv.Value); ok {
+			return n
+		}
+	case "stack":
+		switch kv.Value {
+		case "1":
+			return true
+		case "0":
+			return false
+		}
+	case "limit":
+		if n, ok := parseAttrInt(kv.Value); ok {
+			return n
+		}
+	case "hole":
+		if f, err := strconv.ParseFloat(kv.Value, 64); err == nil {
+			return f
+		}
+	}
+	return kv.Value
 }
 
 func (doc *Document) jsonSQL() *orderedJSON {

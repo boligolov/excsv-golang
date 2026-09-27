@@ -33,6 +33,8 @@ func verifyChecksum(dataSection string, cs *Checksum) error {
 	return nil
 }
 
+// SerializeDataSection renders the data section (header row and body rows)
+// exactly as a checksum covers it.
 func (doc *Document) SerializeDataSection() string {
 	var b strings.Builder
 	d := doc.Header.Dialect()
@@ -47,6 +49,8 @@ func (doc *Document) SerializeDataSection() string {
 	return b.String()
 }
 
+// ComputeDataChecksum returns the hex digest of a data section under the
+// given algorithm (e.g. "sha256").
 func ComputeDataChecksum(dataSection string, algorithm string) (string, error) {
 	return computeDataChecksum(dataSection, algorithm)
 }
@@ -66,10 +70,13 @@ func (doc *Document) setChecksumFromSection(dataSection, algorithm string) error
 	return nil
 }
 
+// SetDataChecksum recomputes checksum= over the document's current data.
 func (doc *Document) SetDataChecksum(algorithm string) error {
 	return doc.setChecksumFromSection(doc.SerializeDataSection(), algorithm)
 }
 
+// SetDataChecksumFromSection sets checksum= from an already-serialized data
+// section (e.g. a sidecar's referenced file, byte for byte).
 func (doc *Document) SetDataChecksumFromSection(dataSection, algorithm string) error {
 	return doc.setChecksumFromSection(dataSection, algorithm)
 }

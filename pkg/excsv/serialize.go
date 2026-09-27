@@ -3,9 +3,13 @@ package excsv
 import (
 	"bytes"
 	"sort"
+	"strconv"
 	"strings"
 )
 
+// SerializeCanonical writes the document in canonical form: header fields
+// in a fixed order, meta lines grouped in the spec's recommended order
+// (#@, #column, #chart, #$, #%), then the data section.
 func (doc *Document) SerializeCanonical() ([]byte, error) {
 	var b bytes.Buffer
 	h := doc.buildCanonicalHeaderLine()
@@ -29,6 +33,10 @@ func (doc *Document) SerializeCanonical() ([]byte, error) {
 			b.WriteByte(' ')
 			b.WriteString(attrs)
 		}
+		b.WriteByte('\n')
+	}
+	for _, c := range doc.Meta.Charts {
+		b.WriteString(c.Text())
 		b.WriteByte('\n')
 	}
 	for _, s := range doc.Meta.SQL {
@@ -71,7 +79,7 @@ func (doc *Document) SerializeCanonical() ([]byte, error) {
 
 var canonicalHeaderOrder = []string{
 	"version", "layout", "delim", "quote", "header", "encoding", "null", "rows",
-	"checksum", "sql-dialect", "reference", "original-size", "table-count",
+	"columns", "checksum", "sql-dialect", "reference", "original-size", "table-count",
 	"single-table", "section-size",
 }
 
@@ -95,6 +103,9 @@ func (doc *Document) buildCanonicalHeaderLine() string {
 				v = doc.Header.DelimName
 			case k == "quote" && doc.Header.HasMagicLine:
 				v = doc.Header.QuoteName
+			case k == "rows" && doc.rowsRequiredOnWrite():
+				// rows= is MUST from 0.5 on; a writer never omits it.
+				v = strconv.Itoa(doc.DeclaredOrCountedRows())
 			default:
 				continue
 			}
@@ -135,6 +146,7 @@ func formatHeaderPair(k, v string) string {
 	return k + "=" + v
 }
 
+// RowCount is the number of body rows read (header row excluded).
 func (doc *Document) RowCount() int {
 	return len(doc.Data.Rows)
 }
@@ -150,10 +162,29 @@ func (doc *Document) DeclaredOrCountedRows() int {
 	return 0
 }
 
+// MetaMap returns the #@ metadata as a map.
 func (doc *Document) MetaMap() map[string]string {
 	m := make(map[string]string, len(doc.Meta.FileMeta))
 	for _, kv := range doc.Meta.FileMeta {
 		m[kv.Key] = kv.Value
 	}
 	return m
+}
+
+// rowsRequiredOnWrite reports whether the canonical header must carry rows=
+// even though the document does not declare it: every v0.5+ header except a
+// pack manifest, as long as the row count is actually known (a sidecar whose
+// referenced data was never read has no count to write).
+func (doc *Document) rowsRequiredOnWrite() bool {
+	version := doc.Header.Version
+	if version == "" {
+		version = CurrentVersion
+	}
+	if rowsOptionalVersions[version] || doc.Header.Fields["layout"] == "pack" {
+		return false
+	}
+	if headerReference(doc.Header) != "" {
+		return doc.Data.HasHeaderRow || len(doc.Data.Rows) > 0
+	}
+	return true
 }

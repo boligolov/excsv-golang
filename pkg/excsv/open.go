@@ -8,6 +8,9 @@ import (
 	excsvzip "github.com/boligolov/excsv-golang/pkg/excsv/zip"
 )
 
+// ParseFile reads and parses path in whatever form it is (plain, sidecar,
+// row ZIP, pack). A .csv/.tsv with a sibling .excsv/.ecsv/.extsv sidecar is
+// parsed through the sidecar.
 func ParseFile(path string, opts ParseOptions) (*ParseResult, error) {
 	path = filepath.Clean(path)
 	data, err := os.ReadFile(path)
@@ -22,6 +25,8 @@ func ParseFile(path string, opts ParseOptions) (*ParseResult, error) {
 	return ParsePath(path, data, opts)
 }
 
+// ParsePath parses data already read from path, dispatching on the path
+// and the ZIP magic bytes.
 func ParsePath(path string, data []byte, opts ParseOptions) (*ParseResult, error) {
 	path = filepath.Clean(path)
 	opts.SourcePath = path
@@ -159,6 +164,7 @@ func applyZipSource(doc *Document, path string, ins *excsvzip.InspectResult) {
 	doc.Source.PrimaryName = ins.PrimaryName
 }
 
+// MapZipError translates a zip.ZipError into the matching *ParseError.
 func MapZipError(err error) error {
 	return mapZipError(err)
 }
@@ -189,10 +195,12 @@ func mapZipError(err error) error {
 	return err
 }
 
+// WrapZip builds a row ZIP around an inner .excsv document.
 func WrapZip(inner []byte, entryName, comment string) ([]byte, error) {
 	return excsvzip.Wrap(inner, entryName, comment)
 }
 
+// WrapZipWithPassword is WrapZip with the entry encrypted under password.
 func WrapZipWithPassword(inner []byte, entryName, comment, password string) ([]byte, error) {
 	return excsvzip.WrapWithPassword(inner, entryName, comment, password)
 }

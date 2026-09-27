@@ -7,16 +7,19 @@ import (
 	"strings"
 )
 
+// SortKey is one sort column: a physical column index and direction.
 type SortKey struct {
 	Index int
 	Desc  bool
 }
 
-// SyncDerived updates rows=, checksum=, and standard #% values after a data rewrite.
+// SyncDerived updates rows=, a declared columns=, checksum=, and standard #%
+// values after a data rewrite.
 func (doc *Document) SyncDerived() error {
 	n := doc.RowCount()
 	doc.Header.Fields["rows"] = strconv.Itoa(n)
 	doc.Header.Rows = &n
+	doc.syncDeclaredColumns()
 	if doc.Header.Checksum != nil {
 		alg := doc.Header.Checksum.Algorithm
 		if alg == "" {
@@ -147,5 +150,13 @@ func boolOrder(s string) int {
 		return 0
 	default:
 		return 1
+	}
+}
+
+// syncDeclaredColumns keeps an optional columns= in step with the physical
+// width (materialize/dematerialize, fix). An absent columns= stays absent.
+func (doc *Document) syncDeclaredColumns() {
+	if _, ok := doc.Header.Fields["columns"]; ok {
+		doc.Header.Fields["columns"] = strconv.Itoa(doc.PhysicalColumnCount())
 	}
 }

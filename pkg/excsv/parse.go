@@ -7,6 +7,8 @@ import (
 	"unicode/utf8"
 )
 
+// ParseBytes parses one plain ExCSV document (or a sidecar, or a ZIP inner
+// entry, per opts). A FAIL-severity code returns a *ParseError.
 func ParseBytes(data []byte, opts ParseOptions) (*ParseResult, error) {
 	data = stripUTF8BOM(data)
 
@@ -36,6 +38,10 @@ func ParseBytes(data []byte, opts ParseOptions) (*ParseResult, error) {
 	records := splitRecords(data)
 	res, err := parseRecords(records, string(data), opts)
 	if err != nil {
+		return nil, err
+	}
+	// Checked last: every more specific defect in the file takes precedence.
+	if err := checkRowsDeclared(res, opts); err != nil {
 		return nil, err
 	}
 	if iss := encodingIssue(data, enc); iss != nil {
@@ -209,6 +215,23 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 				doc.Meta.FileMeta = upsertKV(doc.Meta.FileMeta, key, val)
 			}
 			lastWasSQL = false
+		case strings.HasPrefix(line, "#chart"):
+			c, dropped, ok, err := parseChartLine(line, ln)
+			if err != nil {
+				return nil, err
+			}
+			switch {
+			case !ok:
+				doc.Meta.Unknown = append(doc.Meta.Unknown, UnknownMetaLine{Text: line, Line: ln})
+			case opts.PackRole == "manifest":
+				res.warn(ErrChartOnManifest, ln, "#chart on a pack manifest; charts are per-table, ignored")
+			default:
+				for _, tok := range dropped {
+					res.warn(ErrChartUnknownChannel, ln, "malformed #chart token "+tok+"; ignored")
+				}
+				doc.Meta.Charts = append(doc.Meta.Charts, c)
+			}
+			lastWasSQL = false
 		case strings.HasPrefix(line, "#column"):
 			attrs, err := parseKVLine(strings.TrimPrefix(line, "#column "), ln)
 			if err != nil {
@@ -293,7 +316,11 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 		return nil, err
 	}
 	collectMetaWarnings(res)
+	if err := enforceDeclarations(res); err != nil {
+		return nil, err
+	}
 	applyRowsMismatchWarning(res)
+	applyColumnsMismatchWarning(res, opts)
 
 	if doc.Header.Checksum != nil && len(dataRecords) > 0 {
 		dataSection := extractDataSection(full, records, idx)

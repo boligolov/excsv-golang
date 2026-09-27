@@ -17,6 +17,7 @@ FIXTURE_BASE="${UPSTREAM_BASE}/fixtures"
 # Human-readable guide: docs/*.md. Normative parser spec: docs/implementation/*.md.
 GUIDE_FILES=(
   aggregations.md
+  charts.md
   checksum.md
   columns.md
   data-section.md
@@ -37,6 +38,7 @@ GUIDE_FILES=(
 IMPLEMENTATION_FILES=(
   README.md
   aggregations.md
+  charts.md
   checksum.md
   columns.md
   data-section.md
@@ -128,7 +130,12 @@ if [[ "$SPECS_ONLY" -eq 0 ]]; then
 
   echo "Generating zip fixtures from upstream generator..."
   SPEC_DIR="${TMPDIR:-/tmp}/excsv-spec-sync"
-  if [[ ! -d "$SPEC_DIR/.git" ]]; then
+  # Reusing an old clone would regenerate from stale generators, so always
+  # bring the scratch clone to the current upstream master.
+  if [[ -d "$SPEC_DIR/.git" ]]; then
+    git -C "$SPEC_DIR" fetch --depth 1 origin master
+    git -C "$SPEC_DIR" reset --hard FETCH_HEAD
+  else
     rm -rf "$SPEC_DIR"
     git clone --depth 1 https://github.com/boligolov/excsv.git "$SPEC_DIR"
   fi
