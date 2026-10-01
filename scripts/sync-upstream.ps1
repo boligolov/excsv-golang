@@ -33,6 +33,7 @@ $GuideFiles = @(
     'json.md',
     'license.md',
     'meta-lines.md',
+    'notes.md',
     'pack.md',
     'prior-art.md',
     'sql.md',
@@ -55,6 +56,7 @@ $ImplementationFiles = @(
     'json.md',
     'license.md',
     'meta-lines.md',
+    'notes.md',
     'pack.md',
     'prior-art.md',
     'sql.md',
@@ -63,6 +65,7 @@ $ImplementationFiles = @(
 
 $SpecDownloads = @(
     @{ url = "$UpstreamBase/README.md"; out = 'docs/downloaded/README.md' },
+    @{ url = "$UpstreamBase/CHANGELOG.md"; out = 'docs/downloaded/CHANGELOG.md' },
     @{ url = "$UpstreamBase/docs/README.md"; out = 'docs/downloaded/guide/README.md' },
     @{ url = "$UpstreamBase/plan/README.md"; out = 'docs/downloaded/plan-README.md' },
     @{ url = "$UpstreamBase/plan/01-features.md"; out = 'docs/downloaded/plan-01-features.md' },

@@ -86,6 +86,13 @@ func (doc *Document) Validate(opts ValidateOptions) ValidateReport {
 	for _, iss := range doc.checkDeclarations() {
 		add(iss, "")
 	}
+	// Notes and links are meta lines, but their addresses resolve against the
+	// rows, so they are checked whenever the data has been read.
+	if doc.Data.HasHeaderRow || len(doc.Data.Rows) > 0 {
+		for _, iss := range doc.CheckNotesLinks() {
+			add(iss, "")
+		}
+	}
 	for _, u := range doc.Meta.Unknown {
 		add(newIssue(ErrUnknownMetaLine, u.Line,
 			"unrecognized meta line carried through verbatim: "+u.Text), "")
@@ -148,7 +155,7 @@ func (doc *Document) Validate(opts ValidateOptions) ValidateReport {
 // section: the header line and the #column / #$ declarations themselves.
 func (doc *Document) checkDeclarations() []Issue {
 	var issues []Issue
-	if doc.Header.HasMagicLine && doc.Header.Version != "" && !implementedVersions[doc.Header.Version] {
+	if doc.Header.HasMagicLine && doc.Header.Version != "" && !isKnownVersion(doc.Header.Version) {
 		issues = append(issues, newIssue(ErrUnknownVersion, 1, "unknown version="+doc.Header.Version))
 	}
 	if ref := headerReference(doc.Header); ref != "" && doc.Source.Profile == ProfileInline {

@@ -2,9 +2,22 @@
 
 Reference index for building **excsv-cli** (Go). Use the upstream [boligolov/excsv](https://github.com/boligolov/excsv) repo as the normative source; local copies are convenience snapshots, not forks.
 
-Upstream spec is **v0.5**. This repo implements the **row family** (plain + zip) and **pack family** (`.excsv.pack.zip`).
+Upstream spec is **v0.6**. This repo implements the **row family** (plain + zip) and **pack family** (`.excsv.pack.zip`). Upstream now keeps a version history in [`CHANGELOG.md`](downloaded/CHANGELOG.md).
 
-## Post-v0.5 additions (upstream, version stays 0.5)
+## v0.6 changes (vs v0.5)
+
+| Area | Change |
+| --- | --- |
+| **Version** | `version=0.6`; JSON `"excsv": "0.6"`, schema `$id` `https://excsv.org/schema/excsv-0.6.schema.json`. **Version compatibility:** each version is a superset of the previous one; a parser **MUST** read any earlier version without `unknown_version` — only a version it does not know warns. Normative: [`header.md#version-compatibility`](downloaded/implementation/header.md#version-compatibility). |
+| **Notes** | `#note [row=N\|key=K] [col=C] text="…" [author=…] [created=…]` — a remark on a cell, row, column, or the table, decided by which address fields are present. `key=` addresses a row by its **id column** (single `role=id`, else single `unique=1`; raw-text match, null never matches). FAIL: `note_malformed`, `note_missing_text`, `note_row_and_key`. WARN: `note_unresolved` (kept on round-trip), `note_on_manifest`. |
+| **Links** | `link=` on `#column` is a URL template: `{$}` this cell, `{name}` another stored/materialized column, `{N}` an index (`header=0`), `{{` a literal `{`. Values are percent-encoded (UTF-8, uppercase hex, RFC 3986 unreserved left alone) — except in a single-placeholder template (`link="{$}"`), where the value is the URL. A null placeholder value → no link. `#link (row=\|key=) col= href=` links one cell, overriding the template. Scheme check on the **final** URL: only `http`/`https`/`mailto`. FAIL: `link_malformed`, `link_missing_href`, `link_missing_address`, `link_row_and_key`. WARN: `link_unresolved`, `link_duplicate` (last wins), `link_on_manifest`, `link_unknown_column`, `link_template_malformed`, `link_unsafe_scheme`. |
+| **Writer obligations** | Sort/filter/slice update `row=` and drop lines whose row was removed; renaming a column updates `col=` and `{name}`; removing one drops its notes/links. Writers **SHOULD** emit `key=` over `row=` when the table has an id column. `.xlsx` export: hyperlink objects, never `=HYPERLINK()`. |
+| **Meta order / JSON / ZIP** | Recommended order: `#@`, `#column`, `#chart`, `#note`/`#link`, `#$`, `#%`. JSON: root (or per pack table) `notes` and `links` arrays, `link` on column objects. ZIP comment priority gains two tiers: 9. `#chart`, 10. `#note`/`#link`. Pack: per-table `_header.excsv` only. Checksum never covers meta lines. |
+| **Fixtures** | `plain/valid/078–093`, `plain/invalid/045–051`, `zip/valid/014–015`, `pack/valid/013–014`. Feature IDs D9 (notes), D10 (links). |
+
+Normative spec: [`implementation/notes.md`](downloaded/implementation/notes.md); guide: [`guide/notes.md`](downloaded/guide/notes.md). Implemented in `pkg/excsv` (`notes.go`): parse, resolve, template substitution, scheme check, serialize, JSON mirror, ZIP comment priority, `row=` remapping on `data sort`. CLI: `note list|add|remove`, `link list|set|remove|check`; `link=` is set through `column set NAME --attr link=…`; `column rename` updates `col=` and `{name}` placeholders. Not applicable here: `.xlsx` interop (no xlsx import/export).
+
+## Post-v0.5 additions (landed before the 0.6 bump)
 
 | Area | Change |
 | --- | --- |
@@ -32,6 +45,7 @@ Upstream spec is **v0.5**. This repo implements the **row family** (plain + zip)
 | Resource | URL | Local copy |
 | --- | --- | --- |
 | Spec hub (README) | https://github.com/boligolov/excsv/blob/master/README.md | [`docs/downloaded/README.md`](downloaded/README.md) |
+| Changelog | https://github.com/boligolov/excsv/blob/master/CHANGELOG.md | [`docs/downloaded/CHANGELOG.md`](downloaded/CHANGELOG.md) |
 | Guide topics | https://github.com/boligolov/excsv/tree/master/docs | [`docs/downloaded/guide/`](downloaded/guide/) |
 | **Normative implementation spec** | https://github.com/boligolov/excsv/tree/master/docs/implementation | [`docs/downloaded/implementation/`](downloaded/implementation/) |
 | JSON form spec | https://github.com/boligolov/excsv/blob/master/docs/implementation/json.md | [`docs/downloaded/implementation/json.md`](downloaded/implementation/json.md) |
@@ -46,6 +60,7 @@ Raw download URLs:
 
 ```
 https://raw.githubusercontent.com/boligolov/excsv/master/README.md
+https://raw.githubusercontent.com/boligolov/excsv/master/CHANGELOG.md
 https://raw.githubusercontent.com/boligolov/excsv/master/docs/<topic>.md
 https://raw.githubusercontent.com/boligolov/excsv/master/docs/implementation/<topic>.md
 https://raw.githubusercontent.com/boligolov/excsv/master/schema/excsv.schema.json
@@ -57,7 +72,7 @@ https://raw.githubusercontent.com/boligolov/excsv/master/fixtures/fixtures.yaml
 
 ### `docs/implementation/*.md` — normative spec (highest authority)
 
-RFC 2119 parser/writer rules, error-code registry, ZIP/pack invariants. **If behaviour is not defined here, do not invent it.** Start at [`implementation/README.md`](downloaded/implementation/README.md). Error codes live in `error-handling.md`. Column types/constraints: `columns.md`. Aggregations: `aggregations.md`. Charts: `charts.md`. JSON bijection: `json.md`.
+RFC 2119 parser/writer rules, error-code registry, ZIP/pack invariants. **If behaviour is not defined here, do not invent it.** Start at [`implementation/README.md`](downloaded/implementation/README.md). Error codes live in `error-handling.md`. Column types/constraints: `columns.md`. Aggregations: `aggregations.md`. Charts: `charts.md`. Notes and links: `notes.md`. JSON bijection: `json.md`.
 
 When the human guide (`docs/*.md`) and the implementation spec disagree, **implementation wins**.
 
@@ -81,6 +96,7 @@ docs/
 ├── cli_commands_map.md             ← proposed CLI surface
 └── downloaded/                     ← gitignored snapshots
     ├── README.md
+    ├── CHANGELOG.md                ← version history (v0.6+)
     ├── guide/                      ← docs/*.md (human guide)
     ├── implementation/             ← normative topics (incl. json.md)
     ├── schema/                     ← excsv.schema.json, example.excsv.json

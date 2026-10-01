@@ -9,7 +9,7 @@ import (
 
 var columnAttrDisplayOrder = []string{
 	"name", "index", "title", "description", "type", "format", "unit",
-	"role", "agg", "order", "separator", "enum", "pattern", "regexp_dialect",
+	"role", "agg", "order", "separator", "link", "enum", "pattern", "regexp_dialect",
 	"min", "max", "len_min", "len_max", "unique", "required", "default",
 	"formula", "materialized",
 }
@@ -109,6 +109,9 @@ func (doc *Document) UpsertColumn(name string, attrs map[string]string) error {
 	}
 	if strings.Contains(name, " ") {
 		return fail(ErrColumnMalformedAttribute, 0, "column name must not contain spaces")
+	}
+	if attrs["link"] != "" {
+		doc.requireVersion(NotesVersion)
 	}
 	idx, col, ok := doc.columnByName(name)
 	if !ok {

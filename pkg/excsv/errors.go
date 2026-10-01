@@ -102,16 +102,36 @@ const (
 	ErrChartOnManifest             ErrorKind = "chart_on_manifest"
 	ErrChartUnknownType            ErrorKind = "chart_unknown_type"
 	ErrChartUnknownChannel         ErrorKind = "chart_unknown_channel"
+
+	// Notes and links (#note, link=, #link), added in v0.6.
+
+	ErrNoteMalformed         ErrorKind = "note_malformed"
+	ErrNoteMissingText       ErrorKind = "note_missing_text"
+	ErrNoteRowAndKey         ErrorKind = "note_row_and_key"
+	ErrNoteUnresolved        ErrorKind = "note_unresolved"
+	ErrNoteOnManifest        ErrorKind = "note_on_manifest"
+	ErrLinkMalformed         ErrorKind = "link_malformed"
+	ErrLinkMissingHref       ErrorKind = "link_missing_href"
+	ErrLinkMissingAddress    ErrorKind = "link_missing_address"
+	ErrLinkRowAndKey         ErrorKind = "link_row_and_key"
+	ErrLinkUnresolved        ErrorKind = "link_unresolved"
+	ErrLinkDuplicate         ErrorKind = "link_duplicate"
+	ErrLinkOnManifest        ErrorKind = "link_on_manifest"
+	ErrLinkUnknownColumn     ErrorKind = "link_unknown_column"
+	ErrLinkTemplateMalformed ErrorKind = "link_template_malformed"
+	ErrLinkUnsafeScheme      ErrorKind = "link_unsafe_scheme"
 )
 
 // isFailKind reports whether a code found by a declaration check (computed
-// columns, charts) is FAIL severity in the spec's registry, as opposed to WARN.
+// columns, charts, notes and links) is FAIL severity in the spec's registry, as opposed to WARN.
 func isFailKind(kind ErrorKind) bool {
 	switch kind {
 	case ErrFormulaReferencesComputed, ErrFormulaUnknownReference, ErrFormulaParseError,
 		ErrFormulaIndexForbidden, ErrFormulaRequiresHeader, ErrComputedMaterializedMismatch,
 		ErrChartMissingType, ErrChartMissingName, ErrChartUnknownColumn,
-		ErrChartMissingRequiredChannel, ErrChartVegaInvalidJSON:
+		ErrChartMissingRequiredChannel, ErrChartVegaInvalidJSON,
+		ErrNoteMalformed, ErrNoteMissingText, ErrNoteRowAndKey,
+		ErrLinkMalformed, ErrLinkMissingHref, ErrLinkMissingAddress, ErrLinkRowAndKey:
 		return true
 	}
 	return false

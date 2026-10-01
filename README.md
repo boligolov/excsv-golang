@@ -2,7 +2,7 @@
 
 **Website:** [excsv.org](https://excsv.org)
 
-Go reference implementation of **excsv-cli** — a command-line tool and library for [ExCSV](https://github.com/boligolov/excsv) v0.5 (Extended CSV).
+Go reference implementation of **excsv-cli** — a command-line tool and library for [ExCSV](https://github.com/boligolov/excsv) v0.6 (Extended CSV).
 
 > **Alpha.** The CLI is pre-1.0 and may change without notice — command names, flags, and exit behaviour are not stable across releases yet. Pin a version in scripts and check release notes before upgrading.
 
@@ -186,6 +186,7 @@ excsv data.excsv data sort --by amount:desc
 excsv data.excsv column list
 excsv data.excsv column set amount --attr type=decimal --attr unit=USD
 excsv data.excsv column set total --attr type=decimal --attr formula="price * quantity"
+excsv data.excsv column rename amt amount     # also rewrites formula=, #chart, #note/#link, link=, #fk
 excsv data.excsv column materialize total     # writes the computed values into the data
 excsv data.excsv column dematerialize total   # drops them again, keeps formula=
 excsv data.excsv agg update sum
@@ -194,8 +195,16 @@ excsv data.excsv header rows
 excsv data.excsv meta set author --value "author@example.com"
 excsv data.excsv sql dialect set postgres
 
+# Notes and links (v0.6)
+excsv data.excsv note add --row 2 --col amount --text "Refund pending" --author alex@example.com
+excsv data.excsv note add --col email --text "Imported from the old CRM"   # column note
+excsv data.excsv note list
+excsv data.excsv column set order_id --attr link="https://crm.example.com/orders/{$}"
+excsv data.excsv link set --key 1042 --col invoice --href "https://billing.example.com/inv/A-77"
+excsv data.excsv link check                          # unsafe schemes, unresolved, duplicates
+
 # Export (never modifies FILE)
-excsv data.excsv export json                          # v0.5 JSON form → stdout
+excsv data.excsv export json                          # v0.6 JSON form → stdout
 excsv data.excsv export json -o data.excsv.json       # same document, .excsv.json encoding
 excsv data.excsv export csvw --url data.csv -o data.csv-metadata.json
 
@@ -208,9 +217,13 @@ excsv data.excsv.zip zip unwrap -o data.excsv
 
 **Pattern:** `excsv [flags] FILE <command> …`. Full map: [`docs/cli_commands_map.md`](docs/cli_commands_map.md).
 
-**JSON:** `export json` writes the normative v0.5 document encoding (`.excsv.json`) — a bijection with the text form except `##` human comments, which are reported on stderr. Defaults to stdout; `-o` writes a file. Works on plain, sidecar, row ZIP, and pack.
+**JSON:** `export json` writes the normative v0.6 document encoding (`.excsv.json`) — a bijection with the text form except `##` human comments, which are reported on stderr. Defaults to stdout; `-o` writes a file. Works on plain, sidecar, row ZIP, and pack.
 
 **Computed columns:** `#column formula=` declares a value derived from other columns instead of stored data — virtual (zero storage) until `column materialize` writes it in; `column dematerialize` drops the cached values again without losing `formula=`. Works the same way on plain, row ZIP, and pack; on a sidecar it writes a new inline file instead (`-o`, or a `<name>.materialized.excsv` default) since the sidecar and its referenced CSV are never rewritten.
+
+**Notes and links:** `#note` pins a remark to a cell, row, column, or the table; `link=` on `#column` is a URL template (`{$}` this cell, `{name}` another column, `{N}` an index with `header=0`); `#link` links one cell, overriding the template. `note add --row N` writes `key=` instead when the table has an id column (`role=id`, else `unique=1`), so the note survives sorting; `data sort` renumbers any remaining `row=` anchors. Only `http`/`https`/`mailto` render as links, checked after substitution — `link check` lists everything else. Unresolved lines only warn and are kept on rewrite. Adding a note or link to an older file raises its `version=` to 0.6.
+
+**Renaming a column:** `column rename OLD NEW` rewrites every by-name reference — `#column`, the header cell (refreshing `checksum=`), `formula=`, `#chart` channels, `#note`/`#link` `col=`, `{OLD}` in `link=` templates, and a pack's `#fk`. `#$` SQL and `#chart-vega:` payloads are only reported. On a sidecar the referenced CSV stays untouched; its header text is kept as `title=OLD`.
 
 **Sidecar:** `excsv sales.csv …` auto-discovers `sales.excsv` / `.extsv`; data writes also update the referenced CSV.
 
@@ -253,7 +266,8 @@ docs/downloaded/     Spec hub + guide/ + implementation/ (gitignored; sync from 
 | 3 | Pack, grouped CLI (v0.0.2+), validate/fix, export json/csvw, rich `info` | Done |
 | 4 | Computed columns (v0.5): `formula=`/`materialized=`, `column materialize`/`dematerialize` | Done |
 | 5 | Charts: `#chart` / `#chart-vega:` parse, validate, round-trip, JSON `charts` (library); `excsv chart` renderer | Library done; CLI not yet |
-| 6+ | Streaming, diff, DDL generation from `#column` | Not yet |
+| 6 | Notes and links (v0.6): `#note`, `link=`, `#link` — parse, resolve (`row=`/`key=`), template encoding, scheme check, JSON `notes`/`links`, ZIP comment priority, `row=` kept in sync on sort, `col=`/`{name}` on `column rename`; `note` / `link` CLI groups | Done (`.xlsx` interop n/a: no xlsx export) |
+| 7+ | Streaming, diff, DDL generation from `#column` | Not yet |
 
 ## License
 

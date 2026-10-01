@@ -10,6 +10,65 @@ var implementedVersions = map[string]bool{
 	"0.3": true,
 	"0.4": true,
 	"0.5": true,
+	"0.6": true,
+}
+
+// isKnownVersion reports whether a parser implementing CurrentVersion reads
+// version= v without unknown_version: every implemented version, and any
+// earlier one (header.md § Version compatibility).
+func isKnownVersion(v string) bool {
+	if implementedVersions[v] {
+		return true
+	}
+	_, ok := parseVersion(v)
+	return ok && compareVersions(v, CurrentVersion) < 0
+}
+
+// parseVersion splits a dotted numeric version ("0.6") into its parts.
+func parseVersion(v string) ([]int, bool) {
+	if v == "" {
+		return nil, false
+	}
+	var out []int
+	for _, part := range strings.Split(v, ".") {
+		n, err := strconv.Atoi(part)
+		if err != nil || n < 0 || part == "" || strings.TrimSpace(part) != part {
+			return nil, false
+		}
+		out = append(out, n)
+	}
+	return out, true
+}
+
+// compareVersions orders two dotted numeric versions; an unparseable one
+// sorts after every parseable one.
+func compareVersions(a, b string) int {
+	pa, okA := parseVersion(a)
+	pb, okB := parseVersion(b)
+	switch {
+	case !okA && !okB:
+		return strings.Compare(a, b)
+	case !okA:
+		return 1
+	case !okB:
+		return -1
+	}
+	for i := 0; i < len(pa) || i < len(pb); i++ {
+		x, y := 0, 0
+		if i < len(pa) {
+			x = pa[i]
+		}
+		if i < len(pb) {
+			y = pb[i]
+		}
+		if x != y {
+			if x < y {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
 }
 
 var knownColumnAttrs = map[string]bool{
@@ -18,7 +77,7 @@ var knownColumnAttrs = map[string]bool{
 	"order": true, "separator": true, "enum": true, "pattern": true,
 	"regexp_dialect": true, "min": true, "max": true, "len_min": true,
 	"len_max": true, "unique": true, "required": true, "default": true,
-	"formula": true, "materialized": true,
+	"formula": true, "materialized": true, "link": true,
 }
 
 func (r *ParseResult) warn(kind ErrorKind, line int, msg string) {
@@ -60,7 +119,7 @@ func known8BitEncoding(e string) bool {
 
 func collectHeaderWarnings(res *ParseResult, opts ParseOptions) {
 	h := &res.Doc.Header
-	if h.HasMagicLine && h.Version != "" && !implementedVersions[h.Version] {
+	if h.HasMagicLine && h.Version != "" && !isKnownVersion(h.Version) {
 		res.warn(ErrUnknownVersion, 1, "unknown version="+h.Version)
 	}
 	if cs, ok := h.Fields["checksum"]; ok && cs != "" {
@@ -299,7 +358,7 @@ func applyRowsMismatchWarning(res *ParseResult) {
 
 // enforceDeclarations applies the declaration checks whose FAIL codes a
 // conforming reader MUST reject on (computed columns, charts), and surfaces
-// the chart WARN codes. computed_materialized_mismatch needs the physical
+// the chart, note and link WARN codes. computed_materialized_mismatch needs the physical
 // data, so it only runs once a data section has actually been read — a
 // metadata-only read (ZIP comment peek, unresolved sidecar, pack table
 // header) has nothing to compare materialized= against.
@@ -321,6 +380,11 @@ func enforceDeclarations(res *ParseResult) error {
 			return &ParseError{Issue: iss}
 		}
 		warns = append(warns, iss)
+	}
+	// #note / #link addresses and link= templates resolve against the data;
+	// a metadata-only read has nothing to resolve them against yet.
+	if doc.Data.HasHeaderRow || len(doc.Data.Rows) > 0 {
+		warns = append(warns, doc.CheckNotesLinks()...)
 	}
 	res.Warnings = append(res.Warnings, warns...)
 	return nil

@@ -24,7 +24,7 @@ type JSONExportResult struct {
 	Dropped []string
 }
 
-// ExportJSON writes the v0.5 JSON form of the document (implementation/json.md).
+// ExportJSON writes the JSON form of the document (implementation/json.md).
 //
 // The one documented loss is the spec's own: free-text ## comments carry no
 // structured meaning and have no JSON slot.
@@ -117,6 +117,12 @@ func (doc *Document) appendTableJSON(into *orderedJSON) {
 	}
 	if charts := doc.jsonCharts(); len(charts) > 0 {
 		into.set("charts", charts)
+	}
+	if notes := doc.jsonAnchored(noteAttrs(doc.Meta.Notes), noteJSONKeys); len(notes) > 0 {
+		into.set("notes", notes)
+	}
+	if links := doc.jsonAnchored(linkAttrs(doc.Meta.Links), linkJSONKeys); len(links) > 0 {
+		into.set("links", links)
 	}
 	if sql := doc.jsonSQL(); sql.len() > 0 {
 		into.set("sql", sql)
@@ -304,6 +310,66 @@ func jsonChartAttr(kv KV) any {
 		}
 	}
 	return kv.Value
+}
+
+var (
+	noteJSONKeys = stringSet([]string{"col", "row", "key", "text", "author", "created"})
+	linkJSONKeys = stringSet([]string{"col", "row", "key", "href"})
+)
+
+func noteAttrs(notes []Note) [][]KV {
+	out := make([][]KV, len(notes))
+	for i, n := range notes {
+		out[i] = n.Attrs
+	}
+	return out
+}
+
+func linkAttrs(links []Link) [][]KV {
+	out := make([][]KV, len(links))
+	for i, l := range links {
+		out[i] = l.Attrs
+	}
+	return out
+}
+
+// jsonAnchored mirrors #note / #link lines (notes.md § JSON mirror): one flat
+// object per line, file order preserved. row is an integer, col a name or
+// (header=0) an integer index, key always the raw id text. Unknown attributes
+// are dropped, except the x- ones the schema admits.
+func (doc *Document) jsonAnchored(lines [][]KV, known map[string]bool) []any {
+	if len(lines) == 0 {
+		return nil
+	}
+	declared := map[string]bool{}
+	for _, col := range doc.Meta.Columns {
+		if name := col.Attrs["name"]; name != "" {
+			declared[name] = true
+		}
+	}
+	out := make([]any, 0, len(lines))
+	for _, attrs := range lines {
+		entry := newOrderedJSON()
+		for _, kv := range attrs {
+			if !known[kv.Key] && !strings.HasPrefix(kv.Key, "x-") {
+				continue
+			}
+			var v any = kv.Value
+			switch kv.Key {
+			case "row":
+				if n, ok := parseAttrInt(kv.Value); ok {
+					v = n
+				}
+			case "col":
+				if n, ok := parseAttrInt(kv.Value); ok && !doc.Header.HeaderRow && !declared[kv.Value] {
+					v = n
+				}
+			}
+			entry.set(kv.Key, v)
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func (doc *Document) jsonSQL() *orderedJSON {

@@ -86,8 +86,15 @@ func (doc *Document) SortRows(keys []SortKey) error {
 			return fmt.Errorf("column index out of range: %d", k.Index)
 		}
 	}
-	sort.SliceStable(doc.Data.Rows, func(i, j int) bool {
-		a, b := doc.Data.Rows[i], doc.Data.Rows[j]
+	// Sort a permutation rather than the rows themselves, so #note / #link
+	// row= anchors can follow their rows (notes.md § Writer obligations).
+	anchors := newAnchorResolver(doc)
+	order := make([]int, len(doc.Data.Rows))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		a, b := doc.Data.Rows[order[i]], doc.Data.Rows[order[j]]
 		for _, key := range keys {
 			cmp := compareCells(doc, key.Index, cellAt(doc, a, key.Index), cellAt(doc, b, key.Index))
 			if cmp == 0 {
@@ -100,6 +107,14 @@ func (doc *Document) SortRows(keys []SortKey) error {
 		}
 		return false
 	})
+	sorted := make([][]string, len(order))
+	newIndex := make([]int, len(order))
+	for to, from := range order {
+		sorted[to] = doc.Data.Rows[from]
+		newIndex[from] = to
+	}
+	doc.Data.Rows = sorted
+	doc.remapRowAnchors(anchors, newIndex)
 	return doc.SyncDerived()
 }
 

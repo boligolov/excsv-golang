@@ -29,6 +29,7 @@ GUIDE_FILES=(
   json.md
   license.md
   meta-lines.md
+  notes.md
   pack.md
   prior-art.md
   sql.md
@@ -51,6 +52,7 @@ IMPLEMENTATION_FILES=(
   json.md
   license.md
   meta-lines.md
+  notes.md
   pack.md
   prior-art.md
   sql.md
@@ -82,6 +84,7 @@ if [[ "$FIXTURES_ONLY" -eq 0 ]]; then
   echo "Downloading spec/plan snapshots..."
   mkdir -p docs/downloaded/guide docs/downloaded/implementation docs/downloaded/schema test/fixtures
   download "${UPSTREAM_BASE}/README.md" docs/downloaded/README.md
+  download "${UPSTREAM_BASE}/CHANGELOG.md" docs/downloaded/CHANGELOG.md
   download "${UPSTREAM_BASE}/docs/README.md" docs/downloaded/guide/README.md
   download "${UPSTREAM_BASE}/plan/README.md" docs/downloaded/plan-README.md
   download "${UPSTREAM_BASE}/plan/01-features.md" docs/downloaded/plan-01-features.md

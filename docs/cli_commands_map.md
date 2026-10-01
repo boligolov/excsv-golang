@@ -36,7 +36,7 @@ repeated on subcommands.
 
 - **Noun groups own their meta-line.** Each ExCSV meta line has exactly one group:
   `#!excsv` → `header`, `#@` → `meta`, `#column` → `column`, `#%` → `agg`,
-  `#$` → `sql`, `##` → `comment`. The data section → `data`. The pack container
+  `#$` → `sql`, `#note` → `note`, `#link` → `link`, `##` → `comment`. The data section → `data`. The pack container
   (`#table`, `#fk`, multi-table zip) → `pack`. Row ZIP framing → `zip`.
 - **Foreign formats live at the boundary, never inside the document.** We do not
   store CSV inside an ExCSV file; we convert it. CSVW gets the same treatment, minus
@@ -176,9 +176,26 @@ excsv [--flags] FILE
 │   ├── list
 │   ├── get [NAME]
 │   ├── set NAME --attr k=v...
+│   ├── rename OLD NEW       # + header cell, formula=, #chart, #note/#link col=, link= {OLD}, pack #fk;
+│   │                        #   #$ SQL / #chart-vega: only reported; sidecar CSV untouched (title=OLD)
 │   ├── remove NAME          # (check → validate --with-data --column NAME)
 │   ├── materialize NAME [-o OUT]     # write formula= output into the data, set materialized=1
 │   └── dematerialize NAME [-o OUT]   # drop cached values, keep formula= (v0.5 computed columns)
+│                            # link= templates are column attributes: set NAME --attr link=URL
+│
+├── note                     # #note on a cell, row, column, or the table (v0.6)
+│   ├── list                 # with target (cell/row/column/table) and resolved row
+│   ├── add --text T [--col C] [--row N | --key K] [--author A] [--created TS]
+│   │                        #   --row is written as key= when the table has an id column;
+│   │                        #   an address that resolves nowhere is a usage error
+│   └── remove INDEX
+│
+├── link                     # #link on one cell (v0.6)
+│   ├── list
+│   ├── set --col C (--row N | --key K) --href URL   # replaces a #link on the same cell
+│   ├── remove INDEX
+│   └── check                # link_unsafe_scheme / unresolved / duplicate / template codes;
+│                            #   exit 2 on findings; never follows a link
 │
 ├── agg                      # #% aggregations
 │   ├── list

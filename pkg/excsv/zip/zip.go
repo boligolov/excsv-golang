@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -285,6 +286,9 @@ func stripOriginalSize(header string) string {
 	return "#!excsv " + strings.Join(parts, " ")
 }
 
+// buildComment summarizes the inner file's header and meta lines in the
+// spec's priority order (zip.md § Priority order), keeping file order within
+// each group, so that truncation drops the least important lines first.
 func buildComment(inner string) string {
 	var lines []string
 	for _, line := range strings.Split(inner, "\n") {
@@ -298,7 +302,43 @@ func buildComment(inner string) string {
 		}
 		break
 	}
+	sort.SliceStable(lines, func(i, j int) bool { return commentRank(lines[i]) < commentRank(lines[j]) })
 	return strings.Join(lines, "\n")
+}
+
+// commentRank is a meta line's ZIP comment priority; lower comes first.
+func commentRank(line string) int {
+	hasMetaKey := func(keys ...string) bool {
+		for _, k := range keys {
+			if strings.HasPrefix(line, "#@"+k+":") {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case strings.HasPrefix(line, "#!"):
+		return 1
+	case hasMetaKey("source", "author", "created", "exported", "license", "tool"):
+		return 2
+	case strings.HasPrefix(line, "#column"):
+		return 3
+	case strings.HasPrefix(line, "#$ddl"):
+		return 4
+	case strings.HasPrefix(line, "#%"):
+		return 5
+	case hasMetaKey("comment", "tags"):
+		return 6
+	case strings.HasPrefix(line, "#@"):
+		return 7
+	case strings.HasPrefix(line, "#$dql"):
+		return 8
+	case strings.HasPrefix(line, "#chart"):
+		return 9
+	case strings.HasPrefix(line, "#note"), strings.HasPrefix(line, "#link"):
+		return 10
+	}
+	return 11
 }
 
 func truncateComment(comment string) string {

@@ -75,6 +75,9 @@ func parsePackPath(pathName string, data []byte, opts ParseOptions) (*ParseResul
 			return nil, err
 		}
 		materializePackTable(&pack.Tables[i])
+		// A table's _header.excsv is parsed before its .col data is read, so
+		// its #note / #link lines resolve only now.
+		res.Warnings = append(res.Warnings, pack.Tables[i].Header.CheckNotesLinks()...)
 	}
 
 	res.Pack = pack

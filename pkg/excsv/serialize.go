@@ -9,7 +9,7 @@ import (
 
 // SerializeCanonical writes the document in canonical form: header fields
 // in a fixed order, meta lines grouped in the spec's recommended order
-// (#@, #column, #chart, #$, #%), then the data section.
+// (#@, #column, #chart, #note/#link, #$, #%), then the data section.
 func (doc *Document) SerializeCanonical() ([]byte, error) {
 	var b bytes.Buffer
 	h := doc.buildCanonicalHeaderLine()
@@ -37,6 +37,14 @@ func (doc *Document) SerializeCanonical() ([]byte, error) {
 	}
 	for _, c := range doc.Meta.Charts {
 		b.WriteString(c.Text())
+		b.WriteByte('\n')
+	}
+	for _, n := range doc.Meta.Notes {
+		b.WriteString(n.MetaLine())
+		b.WriteByte('\n')
+	}
+	for _, l := range doc.Meta.Links {
+		b.WriteString(l.MetaLine())
 		b.WriteByte('\n')
 	}
 	for _, s := range doc.Meta.SQL {

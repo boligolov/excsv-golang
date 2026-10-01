@@ -8,7 +8,7 @@ import (
 
 // Set at link time via -ldflags -X.
 var (
-	Version   = "0.0.5"
+	Version   = "0.0.6"
 	BuildTime = "unknown"
 )
 

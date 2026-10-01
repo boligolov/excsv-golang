@@ -232,6 +232,27 @@ func parseRecords(records []record, full string, opts ParseOptions) (*ParseResul
 				doc.Meta.Charts = append(doc.Meta.Charts, c)
 			}
 			lastWasSQL = false
+		case isMetaKeyword(line, "#note"), isMetaKeyword(line, "#link"):
+			isNote := strings.HasPrefix(line, "#note")
+			switch {
+			case opts.PackRole == "manifest" && isNote:
+				res.warn(ErrNoteOnManifest, ln, "#note on a pack manifest; notes are per-table, ignored")
+			case opts.PackRole == "manifest":
+				res.warn(ErrLinkOnManifest, ln, "#link on a pack manifest; links are per-table, ignored")
+			case isNote:
+				n, err := parseNoteLine(line, ln)
+				if err != nil {
+					return nil, err
+				}
+				doc.Meta.Notes = append(doc.Meta.Notes, n)
+			default:
+				l, err := parseLinkLine(line, ln)
+				if err != nil {
+					return nil, err
+				}
+				doc.Meta.Links = append(doc.Meta.Links, l)
+			}
+			lastWasSQL = false
 		case strings.HasPrefix(line, "#column"):
 			attrs, err := parseKVLine(strings.TrimPrefix(line, "#column "), ln)
 			if err != nil {

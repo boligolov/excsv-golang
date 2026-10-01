@@ -1,5 +1,5 @@
 /*
-Package excsv is the reference Go implementation of ExCSV (Extended CSV) v0.5
+Package excsv is the reference Go implementation of ExCSV (Extended CSV) v0.6
 — CSV that describes itself. A conforming document is still plain,
 delimiter-separated data; schema, units, summary statistics, SQL DDL/DQL, and
 an integrity checksum ride along as "#" comment lines that any existing CSV
@@ -48,6 +48,19 @@ Vega-Lite spec instead. Charts are advisory and parsed into
 the FAIL codes (missing type=/name=, unknown column, missing required
 channel, invalid Vega JSON) reject the file. See [Chart],
 [Document.ChartByName], and [Document.AddChart].
+
+# Notes and links
+
+A #note pins a remark to a cell, a row, a column, or the table (v0.6); a
+link= template on #column makes every value a link, and a #link line links a
+single cell, overriding the template. Rows are addressed by position (row=)
+or by the value of the table's id column (key=), which survives sorting.
+Notes and links are advisory and never part of the data:
+[Document.ResolveNotes] resolves each note's address, [Document.ResolveLinks]
+substitutes and percent-encodes templates and applies the http/https/mailto
+scheme check; unresolved lines only warn and are kept on round-trip.
+[Document.SortRows] keeps row= anchors pointing at the same rows. See [Note],
+[Link], [Document.AddNote], and [Document.SetLink].
 
 # Error handling
 

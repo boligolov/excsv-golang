@@ -6,7 +6,7 @@ import (
 )
 
 // CurrentVersion is the ExCSV spec version this package writes.
-const CurrentVersion = "0.5"
+const CurrentVersion = "0.6"
 
 // Form is the storage form a Document was read from.
 type Form int
@@ -24,7 +24,8 @@ type Checksum struct {
 	Hex       string
 }
 
-// KV is one ordered key/value pair (#@ metadata, #chart attributes).
+// KV is one ordered key/value pair (#@ metadata, #chart / #note / #link
+// attributes).
 type KV struct {
 	Key   string
 	Value string
@@ -141,6 +142,8 @@ type MetaBlock struct {
 	FileMeta      []KV
 	Columns       []ColumnDef
 	Charts        []Chart
+	Notes         []Note
+	Links         []Link
 	Aggregations  []Aggregation
 	SQL           []SQLStatement
 	HumanComments []string

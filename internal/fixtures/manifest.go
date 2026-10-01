@@ -41,6 +41,24 @@ type Expect struct {
 	Comment   *CommentExpect    `yaml:"comment"`
 	Computed  *ComputedExpect   `yaml:"computed"`
 	Charts    *ChartsExpect     `yaml:"charts"`
+	Notes     *NotesExpect      `yaml:"notes"`
+	Links     *LinksExpect      `yaml:"links"`
+	// CellLinks maps "row,col" (col a name, or an index with header=0) to the
+	// URL the cell renders as a link, or null for a cell shown as plain text.
+	CellLinks map[string]*string `yaml:"cell_links"`
+}
+
+type NotesExpect struct {
+	Count   *int     `yaml:"count"`
+	Targets []string `yaml:"targets"`
+	// ResolvedRows is the data row each note attaches to; null for a column
+	// or table note, or an unresolved one.
+	ResolvedRows []*int   `yaml:"resolved_rows"`
+	Texts        []string `yaml:"texts"`
+}
+
+type LinksExpect struct {
+	Count *int `yaml:"count"`
 }
 
 type ComputedExpect struct {
@@ -135,6 +153,17 @@ func AssertExpectation(t *testing.T, fx Fixture, res *excsv.ParseResult, err err
 		}
 		if fx.Expect.Charts != nil {
 			assertCharts(t, doc, fx.Expect.Charts)
+		}
+		if fx.Expect.Notes != nil {
+			assertNotes(t, tableDoc(res, fx), fx.Expect.Notes)
+		}
+		if fx.Expect.Links != nil && fx.Expect.Links.Count != nil {
+			if got := len(tableDoc(res, fx).Meta.Links); got != *fx.Expect.Links.Count {
+				t.Fatalf("links.count: got %d want %d", got, *fx.Expect.Links.Count)
+			}
+		}
+		if fx.Expect.CellLinks != nil {
+			assertCellLinks(t, tableDoc(res, fx), fx.Expect.CellLinks)
 		}
 		if fx.Expect.SQL != nil {
 			ddl, dql := countSQL(doc)
@@ -430,4 +459,72 @@ func assertCharts(t *testing.T, doc *excsv.Document, want *ChartsExpect) {
 	if want.Engines != nil && !equalStringSlice(engines, want.Engines) {
 		t.Fatalf("charts.engines: got %v want %v", engines, want.Engines)
 	}
+}
+
+func assertNotes(t *testing.T, doc *excsv.Document, want *NotesExpect) {
+	t.Helper()
+	notes := doc.ResolveNotes()
+	if want.Count != nil && len(notes) != *want.Count {
+		t.Fatalf("notes.count: got %d want %d", len(notes), *want.Count)
+	}
+	var targets, texts []string
+	var rows []*int
+	for _, n := range notes {
+		targets = append(targets, string(n.Target))
+		texts = append(texts, n.Text())
+		if n.Row >= 0 {
+			r := n.Row
+			rows = append(rows, &r)
+		} else {
+			rows = append(rows, nil)
+		}
+	}
+	if want.Targets != nil && !equalStringSlice(targets, want.Targets) {
+		t.Fatalf("notes.targets: got %v want %v", targets, want.Targets)
+	}
+	if want.Texts != nil && !equalStringSlice(texts, want.Texts) {
+		t.Fatalf("notes.texts: got %q want %q", texts, want.Texts)
+	}
+	if want.ResolvedRows != nil {
+		if len(rows) != len(want.ResolvedRows) {
+			t.Fatalf("notes.resolved_rows: got %d entries want %d", len(rows), len(want.ResolvedRows))
+		}
+		for i := range rows {
+			got, exp := rows[i], want.ResolvedRows[i]
+			if (got == nil) != (exp == nil) || (got != nil && *got != *exp) {
+				t.Fatalf("notes.resolved_rows[%d]: got %s want %s", i, fmtIntPtr(got), fmtIntPtr(exp))
+			}
+		}
+	}
+}
+
+func assertCellLinks(t *testing.T, doc *excsv.Document, want map[string]*string) {
+	t.Helper()
+	links := doc.ResolveLinks()
+	for addr, exp := range want {
+		comma := strings.IndexByte(addr, ',')
+		if comma < 0 {
+			t.Fatalf("cell_links: malformed address %q", addr)
+		}
+		var row int
+		if _, err := fmt.Sscanf(addr[:comma], "%d", &row); err != nil {
+			t.Fatalf("cell_links: malformed row in %q", addr)
+		}
+		got, ok := links.CellLink(row, addr[comma+1:])
+		switch {
+		case exp == nil && ok:
+			t.Fatalf("cell_links[%q]: got %q want no link", addr, got)
+		case exp != nil && !ok:
+			t.Fatalf("cell_links[%q]: got no link want %q", addr, *exp)
+		case exp != nil && got != *exp:
+			t.Fatalf("cell_links[%q]: got %q want %q", addr, got, *exp)
+		}
+	}
+}
+
+func fmtIntPtr(p *int) string {
+	if p == nil {
+		return "null"
+	}
+	return fmt.Sprint(*p)
 }

@@ -69,6 +69,20 @@ func newColumnCmd(cfg *config) *cobra.Command {
 		// There is no `column check`: checking cell values against #column is
 		// `validate --with-data [--column NAME]`, the single reporter.
 		&cobra.Command{
+			Use:   "rename OLD NEW",
+			Short: "Rename a column and every reference to it (header cell, formula=, #chart, #note/#link, link=, #fk)",
+			Long: `Rename a column and rewrite every reference to it by name: the #column
+declaration, the header row cell, formula= of computed columns, #chart
+channels, #note / #link col=, {OLD} placeholders in link= templates, and, in a
+pack, #fk from=/to=. #$ SQL and #chart-<engine>: payloads are not rewritten;
+mentions of OLD there are reported on stderr. A sidecar's referenced data file
+is never touched: its header cell is kept as title=OLD instead.`,
+			Args: cobra.ExactArgs(2),
+			Run: func(cmd *cobra.Command, args []string) {
+				runColumnRename(cfg, args[0], args[1])
+			},
+		},
+		&cobra.Command{
 			Use: "remove NAME", Short: "Remove a #column declaration", Args: cobra.ExactArgs(1),
 			Run: func(cmd *cobra.Command, args []string) {
 				runColumnRemove(cfg, args[0])
@@ -238,4 +252,29 @@ func runColumnRemove(cfg *config, name string) {
 		exitParseErr(err)
 	}
 	printMutationOK(cfg, path, name, nil)
+}
+
+func runColumnRename(cfg *config, old, new string) {
+	path := targetPath()
+	doc, err := loadDocForMutation(cfg, path)
+	if err != nil {
+		exitParseErr(err)
+	}
+	notices, err := doc.RenameColumn(old, new)
+	if err != nil {
+		if _, ok := err.(*excsv.ParseError); ok {
+			exitParseErr(err)
+		}
+		exitUserErr(err.Error())
+	}
+	if cfg.pack != nil && cfg.packTable != nil {
+		cfg.pack.RenameColumnFKs(cfg.packTable.Decl.Name, old, new)
+	}
+	if err := saveDocument(cfg, doc, path); err != nil {
+		exitParseErr(err)
+	}
+	for _, n := range notices {
+		fmt.Fprintln(os.Stderr, "note: "+n)
+	}
+	printMutationOK(cfg, path, new, map[string]any{"from": old, "notices": notices})
 }
