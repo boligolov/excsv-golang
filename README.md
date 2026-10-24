@@ -206,6 +206,7 @@ excsv data.excsv link check                          # unsafe schemes, unresolve
 # Export (never modifies FILE)
 excsv data.excsv export json                          # v0.6 JSON form → stdout
 excsv data.excsv export json -o data.excsv.json       # same document, .excsv.json encoding
+excsv data.excsv.json convert -o data.excsv          # JSON form → canonical text (0.0.7+)
 excsv data.excsv export csvw --url data.csv -o data.csv-metadata.json
 
 # Pack / ZIP
@@ -217,7 +218,7 @@ excsv data.excsv.zip zip unwrap -o data.excsv
 
 **Pattern:** `excsv [flags] FILE <command> …`. Full map: [`docs/cli_commands_map.md`](docs/cli_commands_map.md).
 
-**JSON:** `export json` writes the normative v0.6 document encoding (`.excsv.json`) — a bijection with the text form except `##` human comments, which are reported on stderr. Defaults to stdout; `-o` writes a file. Works on plain, sidecar, row ZIP, and pack.
+**JSON:** `export json` writes the normative v0.6 document encoding (`.excsv.json`) — a bijection with the text form except `##` human comments, which are reported on stderr. Defaults to stdout; `-o` writes a file. Works on plain, sidecar, row ZIP, and pack. Since 0.0.7 every command also **reads** the JSON form (detected by content: a top-level object with an `"excsv"` member) with the same checks and warning codes as its text twin, so `excsv data.excsv.json validate` works and `convert -o data.excsv` writes the canonical text. JSON-only problems fail with `json_malformed`. Pack documents (`tables`) are export-only for now.
 
 **Computed columns:** `#column formula=` declares a value derived from other columns instead of stored data — virtual (zero storage) until `column materialize` writes it in; `column dematerialize` drops the cached values again without losing `formula=`. Works the same way on plain, row ZIP, and pack; on a sidecar it writes a new inline file instead (`-o`, or a `<name>.materialized.excsv` default) since the sidecar and its referenced CSV are never rewritten.
 

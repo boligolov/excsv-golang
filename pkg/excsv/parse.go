@@ -11,6 +11,13 @@ import (
 // entry, per opts). A FAIL-severity code returns a *ParseError.
 func ParseBytes(data []byte, opts ParseOptions) (*ParseResult, error) {
 	data = stripUTF8BOM(data)
+	if IsJSONForm(data) {
+		text, err := JSONToText(data)
+		if err != nil {
+			return nil, err
+		}
+		data = text
+	}
 
 	enc := "UTF-8"
 	if firstLine := firstLineBytes(data); strings.HasPrefix(firstLine, "#!excsv") {

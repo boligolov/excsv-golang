@@ -74,11 +74,11 @@ func (doc *Document) SerializeCanonical() ([]byte, error) {
 	layout := doc.Header.Fields["layout"]
 	if layout != "pack" && layout != "columnar" && doc.Source.Profile != ProfileSidecar && headerReference(doc.Header) == "" {
 		if doc.Data.HasHeaderRow {
-			b.WriteString(joinCSVFields(doc.Data.HeaderRow, d))
+			b.WriteString(joinRow(doc.Data.HeaderRow, d))
 			b.WriteByte('\n')
 		}
 		for _, row := range doc.Data.Rows {
-			b.WriteString(joinCSVFields(row, d))
+			b.WriteString(joinRow(row, d))
 			b.WriteByte('\n')
 		}
 	}

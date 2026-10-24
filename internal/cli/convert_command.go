@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,9 +114,11 @@ func isExcsvInput(path string) bool {
 		return false
 	}
 	defer file.Close()
-	head := make([]byte, 16)
-	n, _ := file.Read(head)
-	return strings.HasPrefix(strings.TrimPrefix(string(head[:n]), "\ufeff"), "#!excsv")
+	head := make([]byte, 4096)
+	n, _ := io.ReadFull(file, head)
+	text := strings.TrimPrefix(string(head[:n]), "\ufeff")
+	// The JSON form is an ExCSV document too: convert re-encodes it as text.
+	return strings.HasPrefix(text, "#!excsv") || excsv.IsJSONForm([]byte(text))
 }
 
 // importDocument builds a new ExCSV document from a delimited source.
