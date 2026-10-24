@@ -711,8 +711,8 @@ a full peer of the text form, so an `import json` is a legitimate future command
 This is the gap that matters more than CSVW. `implementation/json.md` (v0.5) is
 normative: it defines a **bijection** — *"any conforming ExCSV text document maps to
 exactly one JSON document and back, with no loss"* — ships
-[`schema/excsv.schema.json`](https://excsv.org/schema/excsv-0.5.schema.json)
-(draft 2020-12, `$id` `https://excsv.org/schema/excsv-0.5.schema.json`) and an
+[`schema/excsv.schema.json`](https://excsv.dev/schema/excsv-0.5.schema.json)
+(draft 2020-12, `$id` `https://excsv.dev/schema/excsv-0.5.schema.json`) and an
 example, and calls out LLM structured output as a target.
 
 Output defaults to stdout; `-o` writes a `.excsv.json` file. The JSON form is not a
