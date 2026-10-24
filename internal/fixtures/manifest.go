@@ -21,6 +21,7 @@ type Fixture struct {
 	Exercises    []string `yaml:"exercises"`
 	DerivedFrom  string   `yaml:"derived_from"`
 	DataSibling  string   `yaml:"data_sibling"`
+	EquivalentTo string   `yaml:"equivalent_to"`
 	Expect       Expect   `yaml:"expect"`
 	SupersededBy string   `yaml:"superseded_by"`
 }
@@ -342,7 +343,7 @@ func FilterRF(m *Manifest) []Fixture {
 		if fx.SupersededBy != "" {
 			continue
 		}
-		if strings.HasPrefix(fx.ID, "plain/") || strings.HasPrefix(fx.ID, "zip/") || strings.HasPrefix(fx.ID, "pack/") {
+		if strings.HasPrefix(fx.ID, "plain/") || strings.HasPrefix(fx.ID, "zip/") || strings.HasPrefix(fx.ID, "pack/") || strings.HasPrefix(fx.ID, "json/") {
 			out = append(out, fx)
 		}
 	}
