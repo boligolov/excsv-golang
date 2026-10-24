@@ -264,9 +264,9 @@ func (w *jsonTextWriter) columns() ([]jsonColumn, error) {
 		c.virtual = formula && !materialized
 		idx, hasIdx := obj.values["index"]
 		switch {
-		case c.virtual && hasIdx:
-			return nil, jsonFail(fmt.Sprintf("columns[%d]: a virtual computed column has no index", i))
 		case c.virtual:
+			// An index on a formula column stays on its #column line, where
+			// the text check reports formula_index_forbidden.
 			virt = append(virt, c)
 			continue
 		case !hasIdx:
@@ -322,7 +322,7 @@ func (w *jsonTextWriter) headerRow(columns []jsonColumn, width int) ([]string, e
 func (w *jsonTextWriter) columnLine(c jsonColumn) (string, error) {
 	attrs := map[string]string{}
 	for _, k := range c.attrs.keys {
-		if k == "index" {
+		if k == "index" && !c.virtual {
 			continue
 		}
 		s, err := jsonColumnAttrText(k, c.attrs.values[k])
