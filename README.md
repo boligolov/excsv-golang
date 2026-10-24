@@ -1,6 +1,6 @@
 # excsv-golang
 
-**Website:** [excsv.org](https://excsv.org)
+**Website:** [excsv.dev](https://excsv.dev)
 
 Go reference implementation of **excsv-cli** — a command-line tool and library for [ExCSV](https://github.com/boligolov/excsv) v0.6 (Extended CSV).
 
