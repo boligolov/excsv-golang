@@ -477,8 +477,7 @@ func effectiveColumnCount(doc *Document, headerWidth int) int {
 
 func validateColumns(res *ParseResult, headerWidth int) error {
 	doc := res.Doc
-	phys := 0
-	for _, col := range doc.Meta.Columns {
+	for i, col := range doc.Meta.Columns {
 		if col.Attrs["formula"] != "" {
 			if !doc.Header.HeaderRow {
 				return fail(ErrFormulaRequiresHeader, col.Line, "formula= requires header=1")
@@ -492,21 +491,18 @@ func validateColumns(res *ParseResult, headerWidth int) error {
 			// entirely, so there is nothing further to check against the row.
 			continue
 		}
-		i := phys
-		phys++
 		if doc.Header.HeaderRow {
 			name, hasName := col.Attrs["name"]
 			if !hasName || name == "" {
 				return fail(ErrColumnMissingName, col.Line, "missing name= when header=1")
 			}
-			title, hasTitle := col.Attrs["title"]
-			if headerWidth > 0 && len(doc.Data.HeaderRow) > i {
-				cell := doc.Data.HeaderRow[i]
-				if hasTitle && cell != title {
-					res.warn(ErrColumnTitleHeaderMismatch, col.Line, "title does not match header row")
-				}
-				if !hasTitle && cell != name {
-					res.warn(ErrColumnNameHeaderMismatch, col.Line, "name does not match header row")
+			// Binding is by name: the line's place in the meta block is
+			// irrelevant, only whether some header cell carries its name.
+			if headerWidth > 0 && doc.bindsByName() && doc.declPhysIndex(i) < 0 {
+				if _, hasTitle := col.Attrs["title"]; hasTitle {
+					res.warn(ErrColumnTitleHeaderMismatch, col.Line, "no header cell matches title")
+				} else {
+					res.warn(ErrColumnNameHeaderMismatch, col.Line, "no header cell matches name")
 				}
 			}
 		} else if _, ok := col.Attrs["index"]; !ok {

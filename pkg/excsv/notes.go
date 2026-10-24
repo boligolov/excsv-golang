@@ -259,40 +259,13 @@ func (r *anchorResolver) findIDColumn() {
 	}
 }
 
-// physIndexOfDecl maps a non-virtual #column to its physical position: index=
-// when set, else (header=1) its header cell, else declaration order over
-// non-virtual columns.
+// physIndexOfDecl maps a non-virtual #column to its physical position (see
+// Document.declPhysIndex).
 func (r *anchorResolver) physIndexOfDecl(col ColumnDef) int {
-	if v, ok := col.Attrs["index"]; ok {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
+	for i, c := range r.doc.Meta.Columns {
+		if c.Attrs["name"] == col.Attrs["name"] && c.Line == col.Line {
+			return r.doc.declPhysIndex(i)
 		}
-		return -1
-	}
-	name := col.Attrs["name"]
-	if r.doc.Header.HeaderRow && name != "" {
-		for i, cell := range r.doc.Data.HeaderRow {
-			if cell == name {
-				return i
-			}
-		}
-		if title := col.Attrs["title"]; title != "" {
-			for i, cell := range r.doc.Data.HeaderRow {
-				if cell == title {
-					return i
-				}
-			}
-		}
-	}
-	phys := 0
-	for _, c := range r.doc.Meta.Columns {
-		if isVirtualColumn(c) {
-			continue
-		}
-		if c.Attrs["name"] == name && c.Line == col.Line {
-			return phys
-		}
-		phys++
 	}
 	return -1
 }

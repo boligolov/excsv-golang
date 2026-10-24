@@ -32,28 +32,69 @@ func (doc *Document) ColumnIndex(ref string) (int, error) {
 			return i, nil
 		}
 	}
-	// Declaration order only matches physical position once virtual computed
-	// columns (formula= set, not materialized) are excluded from the count:
-	// a virtual column has no header cell and no field in any row.
-	phys := 0
-	for _, col := range doc.Meta.Columns {
-		virtual := isVirtualColumn(col)
-		if col.Attrs["name"] == ref {
-			if virtual {
-				return -1, fmt.Errorf("column %s is virtual (formula=), has no physical index", ref)
-			}
-			if v, ok := col.Attrs["index"]; ok {
-				if n, err := strconv.Atoi(v); err == nil {
-					return n, nil
-				}
-			}
-			return phys, nil
+	for i, col := range doc.Meta.Columns {
+		if col.Attrs["name"] != ref {
+			continue
 		}
-		if !virtual {
+		if isVirtualColumn(col) {
+			return -1, fmt.Errorf("column %s is virtual (formula=), has no physical index", ref)
+		}
+		if n := doc.declPhysIndex(i); n >= 0 {
+			return n, nil
+		}
+		return -1, fmt.Errorf("column %s matches no header cell", ref)
+	}
+	return -1, fmt.Errorf("unknown column: %s", ref)
+}
+
+// bindsByName reports whether #column lines bind to header cells by name:
+// header=1 with a header row to bind against. Without one (a pack table's
+// _header.excsv, a header-only stub) declaration order is all there is.
+func (doc *Document) bindsByName() bool {
+	return doc.Header.HeaderRow && len(doc.Data.HeaderRow) > 0
+}
+
+// headerCellOf returns the header cell a #column binds to: title= when set,
+// else name=.
+func headerCellOf(col ColumnDef) string {
+	if t, ok := col.Attrs["title"]; ok {
+		return t
+	}
+	return col.Attrs["name"]
+}
+
+// declPhysIndex maps the non-virtual #column doc.Meta.Columns[i] to its
+// physical position, or -1. With a header row it is the first header cell
+// equal to the column's title=/name= — never the line's place in the meta
+// block. Otherwise index= when set, else declaration order over non-virtual
+// columns.
+func (doc *Document) declPhysIndex(i int) int {
+	col := doc.Meta.Columns[i]
+	if isVirtualColumn(col) {
+		return -1
+	}
+	if doc.bindsByName() {
+		want := headerCellOf(col)
+		for j, cell := range doc.Data.HeaderRow {
+			if cell == want {
+				return j
+			}
+		}
+		return -1
+	}
+	if v, ok := col.Attrs["index"]; ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+		return -1
+	}
+	phys := 0
+	for _, c := range doc.Meta.Columns[:i] {
+		if !isVirtualColumn(c) {
 			phys++
 		}
 	}
-	return -1, fmt.Errorf("unknown column: %s", ref)
+	return phys
 }
 
 func (doc *Document) columnWidth() int {
@@ -69,27 +110,17 @@ func (doc *Document) columnWidth() int {
 	return 0
 }
 
+// columnDefAt returns the #column bound to physical column col. Two lines
+// bound to the same column are a duplicate_column; the last one wins.
 func (doc *Document) columnDefAt(col int) (ColumnDef, bool) {
-	// See ColumnIndex: declaration order maps to physical position only over
-	// non-virtual columns, since a virtual computed column occupies no
-	// physical slot.
-	phys := 0
-	for _, c := range doc.Meta.Columns {
-		if isVirtualColumn(c) {
-			continue
+	var found ColumnDef
+	ok := false
+	for i, c := range doc.Meta.Columns {
+		if doc.declPhysIndex(i) == col {
+			found, ok = c, true
 		}
-		idx := phys
-		if v, ok := c.Attrs["index"]; ok {
-			if n, err := strconv.Atoi(v); err == nil {
-				idx = n
-			}
-		}
-		if idx == col {
-			return c, true
-		}
-		phys++
 	}
-	return ColumnDef{}, false
+	return found, ok
 }
 
 func (doc *Document) columnByName(name string) (int, ColumnDef, bool) {

@@ -281,30 +281,9 @@ func physicalWidth(doc *Document) int {
 }
 
 func columnIndexForDef(doc *Document, col ColumnDef) int {
-	if v, ok := col.Attrs["index"]; ok {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return -1
-		}
-		return n
-	}
-	name := col.Attrs["name"]
-	if name == "" {
-		return -1
-	}
-	for i, cell := range doc.Data.HeaderRow {
-		if cell == name || cell == col.Attrs["title"] {
-			return i
-		}
-	}
 	for i, c := range doc.Meta.Columns {
-		if c.Attrs["name"] == name {
-			if v, ok := c.Attrs["index"]; ok {
-				if n, err := strconv.Atoi(v); err == nil {
-					return n
-				}
-			}
-			return i
+		if c.Line == col.Line && c.Attrs["name"] == col.Attrs["name"] {
+			return doc.declPhysIndex(i)
 		}
 	}
 	return -1
