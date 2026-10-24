@@ -62,6 +62,18 @@ func TestCheckSchemaOK(t *testing.T) {
 	}
 }
 
+// #column lines bind to header cells by name, whatever their order.
+func TestCheckSchemaBindsByName(t *testing.T) {
+	doc := parseDoc(t, "#!excsv version=0.6 rows=1\n#column name=amount type=decimal\n#column name=id type=int\nid,note,amount\n1,hello,x\n")
+	issues := doc.CheckSchema()
+	if len(issues) != 1 || !strings.Contains(issues[0].Message, "amount") {
+		t.Fatalf("want one issue on amount, got %v", issues)
+	}
+	if i, err := doc.ColumnIndex("amount"); err != nil || i != 2 {
+		t.Fatalf("ColumnIndex(amount) = %d, %v; want 2", i, err)
+	}
+}
+
 func TestUpsertColumn(t *testing.T) {
 	doc := parseDoc(t, "#!excsv version=0.2\nid,amount\n1,10\n")
 	if err := doc.UpsertColumn("amount", map[string]string{"type": "decimal", "unit": "USD"}); err != nil {

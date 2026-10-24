@@ -43,9 +43,7 @@ func (doc *Document) ExportJSON(opts JSONExportOptions) (*JSONExportResult, erro
 	if meta := doc.jsonMeta(); meta.len() > 0 {
 		root.set("meta", meta)
 	}
-	doc.appendTableJSON(root)
-
-	res := &JSONExportResult{}
+	res := &JSONExportResult{Dropped: doc.appendTableJSON(root)}
 	if len(doc.Meta.HumanComments) > 0 {
 		res.Dropped = append(res.Dropped, "## human comments (the spec's one intentional non-round-trip)")
 	}
@@ -84,7 +82,9 @@ func (p *Pack) ExportJSON(opts JSONExportOptions) (*JSONExportResult, error) {
 		tdoc := p.Tables[i].Document()
 		entry := newOrderedJSON()
 		entry.set("name", p.Tables[i].Decl.Name)
-		tdoc.appendTableJSON(entry)
+		for _, d := range tdoc.appendTableJSON(entry) {
+			res.Dropped = append(res.Dropped, d+" in table "+p.Tables[i].Decl.Name)
+		}
 		tables = append(tables, entry)
 		if len(tdoc.Meta.HumanComments) > 0 {
 			res.Dropped = append(res.Dropped, "## human comments in table "+p.Tables[i].Decl.Name)
@@ -111,8 +111,9 @@ func (p *Pack) ExportJSON(opts JSONExportOptions) (*JSONExportResult, error) {
 
 // appendTableJSON writes the members shared by a single-table document and one
 // entry of a pack's tables array.
-func (doc *Document) appendTableJSON(into *orderedJSON) {
-	if cols := doc.jsonColumns(); len(cols) > 0 {
+func (doc *Document) appendTableJSON(into *orderedJSON) (dropped []string) {
+	cols, dropped := doc.jsonColumns()
+	if len(cols) > 0 {
 		into.set("columns", cols)
 	}
 	if charts := doc.jsonCharts(); len(charts) > 0 {
@@ -124,11 +125,19 @@ func (doc *Document) appendTableJSON(into *orderedJSON) {
 	if links := doc.jsonAnchored(linkAttrs(doc.Meta.Links), linkJSONKeys); len(links) > 0 {
 		into.set("links", links)
 	}
-	if sql := doc.jsonSQL(); sql.len() > 0 {
+	sql, sqlDropped := doc.jsonSQL()
+	dropped = append(dropped, sqlDropped...)
+	if sql.len() > 0 {
 		into.set("sql", sql)
 	}
 	if cs := doc.Header.Fields["checksum"]; cs != "" {
-		into.set("checksum", cs)
+		// The schema admits only <algo>:<lowercase hex>; a malformed value
+		// (checksum_malformed) has no JSON slot.
+		if _, kind := classifyChecksumField(cs); kind != ErrChecksumMalformed {
+			into.set("checksum", cs)
+		} else {
+			dropped = append(dropped, "checksum="+cs+": malformed")
+		}
 	}
 	into.set("rows", doc.DeclaredOrCountedRows())
 	if n, ok := parseAttrInt(doc.Header.Fields["columns"]); ok {
@@ -139,9 +148,10 @@ func (doc *Document) appendTableJSON(into *orderedJSON) {
 	}
 	if ref := headerReference(doc.Header); ref != "" {
 		into.set("reference", ref)
-		return
+		return dropped
 	}
 	into.set("data", doc.jsonData())
+	return dropped
 }
 
 func (doc *Document) jsonLayout() Profile {
@@ -162,7 +172,8 @@ func (doc *Document) jsonDialect() *orderedJSON {
 	}
 	csv.set("encoding", enc)
 	if doc.Header.Null != "" {
-		csv.set("null", doc.Header.Null)
+		// The schema types csv.null as an array of markers.
+		csv.set("null", []string{doc.Header.Null})
 	}
 	return csv
 }
@@ -186,47 +197,79 @@ func (doc *Document) jsonMeta() *orderedJSON {
 	return meta
 }
 
-func (doc *Document) jsonColumns() []any {
-	if len(doc.Meta.Columns) == 0 {
-		return nil
+// jsonColumns writes one object per physical column, in index order, then
+// the virtual computed columns (json.md § Column order). index comes from
+// the header cell a #column binds to, never its line order; a physical
+// column no #column describes becomes a bare {index, name} object so its
+// header name survives. A #column bound to no column is reported in dropped.
+func (doc *Document) jsonColumns() (out []any, dropped []string) {
+	width := doc.PhysicalColumnCount()
+	bound := make([]int, width) // declaration index per physical column, -1 if none
+	for i := range bound {
+		bound[i] = -1
 	}
-	out := make([]any, 0, len(doc.Meta.Columns))
-	phys := 0
-	for _, col := range doc.Meta.Columns {
-		entry := newOrderedJSON()
-		// index is REQUIRED on every physical column object in the JSON
-		// form, even though the text form only requires it when header=0 —
-		// but MUST NOT be present on a virtual computed column, which has
-		// no physical position at all.
-		if !isVirtualColumn(col) {
-			idx := phys
-			if v, ok := parseAttrInt(col.Attrs["index"]); ok {
-				idx = v
-			}
-			entry.set("index", idx)
-			phys++
+	var virtual []ColumnDef
+	for i, col := range doc.Meta.Columns {
+		if isVirtualColumn(col) {
+			virtual = append(virtual, col)
+			continue
 		}
-		colType := col.Attrs["type"]
-		for _, k := range columnAttrDisplayOrder {
-			v, ok := col.Attrs[k]
-			if !ok || k == "index" {
-				continue
-			}
-			entry.set(k, jsonColumnAttr(k, v, colType))
+		p := doc.declPhysIndex(i)
+		if p < 0 || p >= width {
+			dropped = append(dropped, "#column "+col.Attrs["name"]+": matches no column")
+			continue
 		}
-		var extra []string
-		for k := range col.Attrs {
-			if !knownColumnAttrs[k] {
-				extra = append(extra, k)
-			}
+		if bound[p] >= 0 {
+			dropped = append(dropped, "#column "+doc.Meta.Columns[bound[p]].Attrs["name"]+": duplicate, last one wins")
 		}
-		sort.Strings(extra)
-		for _, k := range extra {
-			entry.set(k, col.Attrs[k])
-		}
-		out = append(out, entry)
+		bound[p] = i
 	}
-	return out
+	if width == 0 && len(virtual) == 0 {
+		return nil, dropped
+	}
+	for p, i := range bound {
+		if i < 0 {
+			entry := newOrderedJSON()
+			entry.set("index", p)
+			if doc.Header.HeaderRow && p < len(doc.Data.HeaderRow) {
+				entry.set("name", doc.Data.HeaderRow[p])
+			}
+			out = append(out, entry)
+			continue
+		}
+		out = append(out, jsonColumnEntry(doc.Meta.Columns[i], p))
+	}
+	for _, col := range virtual {
+		out = append(out, jsonColumnEntry(col, -1))
+	}
+	return out, dropped
+}
+
+// jsonColumnEntry renders one #column; index < 0 means virtual (no index).
+func jsonColumnEntry(col ColumnDef, index int) *orderedJSON {
+	entry := newOrderedJSON()
+	if index >= 0 {
+		entry.set("index", index)
+	}
+	colType := col.Attrs["type"]
+	for _, k := range columnAttrDisplayOrder {
+		v, ok := col.Attrs[k]
+		if !ok || k == "index" {
+			continue
+		}
+		entry.set(k, jsonColumnAttr(k, v, colType))
+	}
+	var extra []string
+	for k := range col.Attrs {
+		if !knownColumnAttrs[k] {
+			extra = append(extra, k)
+		}
+	}
+	sort.Strings(extra)
+	for _, k := range extra {
+		entry.set(k, col.Attrs[k])
+	}
+	return entry
 }
 
 func jsonColumnAttr(key, value, columnType string) any {
@@ -372,16 +415,30 @@ func (doc *Document) jsonAnchored(lines [][]KV, known map[string]bool) []any {
 	return out
 }
 
-func (doc *Document) jsonSQL() *orderedJSON {
+// jsonSQL mirrors #$ddl / #$dql lines. The JSON sql object only has those two
+// verbs, so a line with any other verb (sql_unknown_verb) is reported.
+func (doc *Document) jsonSQL() (*orderedJSON, []string) {
 	sql := newOrderedJSON()
 	byVerb := map[string][]any{}
-	var verbs []string
+	var verbs, dropped []string
 	for _, stmt := range doc.Meta.SQL {
+		if stmt.Verb != "ddl" && stmt.Verb != "dql" {
+			dropped = append(dropped, "#$"+stmt.Verb+": unknown SQL verb")
+			continue
+		}
 		entry := newOrderedJSON()
 		if stmt.Qualified && stmt.Dialect != "" {
 			entry.set("dialect", stmt.Dialect)
 			if stmt.Version != "" {
 				entry.set("version", stmt.Version)
+			}
+		} else if d := strings.TrimSpace(doc.Header.Fields["sql-dialect"]); d != "" {
+			// JSON has no sql-dialect slot: the header default moves onto
+			// each unqualified statement, which keeps its meaning.
+			dialect, version := splitDialectVersion(strings.ToLower(d))
+			entry.set("dialect", dialect)
+			if version != "" {
+				entry.set("version", version)
 			}
 		}
 		entry.set("stmt", stmt.Payload)
@@ -393,7 +450,7 @@ func (doc *Document) jsonSQL() *orderedJSON {
 	for _, verb := range verbs {
 		sql.set(verb, byVerb[verb])
 	}
-	return sql
+	return sql, dropped
 }
 
 func (doc *Document) jsonAggregates() *orderedJSON {
@@ -425,7 +482,7 @@ func jsonAggValue(name, value, columnType string) any {
 
 func (doc *Document) jsonData() []any {
 	rows := make([]any, 0, len(doc.Data.Rows))
-	width := doc.columnWidth()
+	width := doc.PhysicalColumnCount()
 	for _, row := range doc.Data.Rows {
 		n := width
 		if n == 0 {

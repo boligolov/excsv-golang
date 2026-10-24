@@ -79,6 +79,7 @@ const (
 	ErrExtsvDelimMismatch        ErrorKind = "extsv_delim_mismatch"
 	ErrSidecarChecksumMismatch   ErrorKind = "sidecar_checksum_mismatch"
 	ErrReferenceOnInline         ErrorKind = "reference_on_inline"
+	ErrJSONMalformed             ErrorKind = "json_malformed"
 
 	// Computed columns (formula=/materialized=), added in v0.5.
 

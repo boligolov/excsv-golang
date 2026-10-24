@@ -101,7 +101,7 @@ jobs:
               'excsv-cli' \
               'Command-line tool for ExCSV v0.4 (Extended CSV)' \
               "Version: ${VERSION}" \
-              'https://excsv.org' \
+              'https://excsv.dev' \
               "SHA256: ${SHA256}"
           } > zip-comment.txt
           zip -z "$ZIP" < zip-comment.txt
