@@ -329,8 +329,11 @@ func jsonChartAttr(kv KV) any {
 			return out
 		}
 	case "bin":
-		// bin=1 switches binning on; any other count is the bin count.
-		if kv.Value == "1" {
+		// bin=0 is no binning, bin=1 switches it on; any other count is the bin count.
+		switch kv.Value {
+		case "0":
+			return false
+		case "1":
 			return true
 		}
 		if n, ok := parseAttrInt(kv.Value); ok {
