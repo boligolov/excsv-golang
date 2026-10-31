@@ -167,6 +167,37 @@ func TestAddAndRemoveChart(t *testing.T) {
 	}
 }
 
+func TestChartBinJSONMirror(t *testing.T) {
+	// bin=0 is no binning, bin=1 the default count, never one bin; the schema's bin is a boolean or
+	// an integer of at least 1, so 0 has to be false.
+	for _, tc := range []struct {
+		text string
+		want any
+	}{{"0", false}, {"1", true}, {"20", float64(20)}} {
+		doc := parseDoc(t, chartSchema+"#chart type=bar name=hist bin="+tc.text+" x=amount y=count()\n"+chartData)
+		res, err := doc.ExportJSON(excsv.JSONExportOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Charts []map[string]any `json:"charts"`
+		}
+		if err := json.Unmarshal(res.Data, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Charts[0]["bin"] != tc.want {
+			t.Fatalf("bin=%s mirrors to %#v, want %#v", tc.text, got.Charts[0]["bin"], tc.want)
+		}
+		c, ok := parseDoc(t, string(res.Data)).ChartByName("hist")
+		if !ok {
+			t.Fatalf("bin=%s: no chart after the round trip", tc.text)
+		}
+		if v, _ := c.Attr("bin"); v != tc.text {
+			t.Fatalf("bin=%s reads back as %q", tc.text, v)
+		}
+	}
+}
+
 func TestChartJSONMirror(t *testing.T) {
 	doc := parseDoc(t, chartSchema+
 		"#chart type=arc name=donut theta=amount color=category hole=0.5 stack=1 tooltip=category,amount\n"+
